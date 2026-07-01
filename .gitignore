@@ -1,0 +1,17 @@
+# Build output
+main.js
+*.js.map
+
+# Dependencies
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# npm
+npm-debug.log*
