@@ -94,7 +94,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   }
 
   private createApiBackend(): ApiBackend {
-    return new ApiBackend({
+    return new ApiBackend(this.app.vault, {
       provider: this.settings.apiProvider as ApiProvider,
       token: this.settings.apiToken,
       repo: this.settings.remoteUrl,

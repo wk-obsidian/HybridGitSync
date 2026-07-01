@@ -1,4 +1,4 @@
-import { requestUrl, RequestUrlResponse } from 'obsidian';
+import { requestUrl, RequestUrlResponse, Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 
 export type ApiProvider = 'github' | 'gitlab' | 'gitea';
@@ -17,17 +17,17 @@ interface FileEntry {
   sha: string;
   size: number;
   type: 'file' | 'dir';
-  content?: string;
-  encoding?: string;
 }
 
 export class ApiBackend extends SyncBackend {
   readonly name: string;
   private config: ApiConfig;
   private baseUrl: string;
+  private vault: Vault;
 
-  constructor(config: ApiConfig) {
+  constructor(vault: Vault, config: ApiConfig) {
     super();
+    this.vault = vault;
     this.config = config;
     this.name = `api-${config.provider}`;
     this.baseUrl = config.baseUrl || this.getDefaultBaseUrl(config.provider);
@@ -43,52 +43,182 @@ export class ApiBackend extends SyncBackend {
   }
 
   async pull(): Promise<SyncResult> {
-    // Pull is handled at file level by the sync engine
-    // This method fetches the latest file tree from remote
     try {
-      const files = await this.listFilesRecursive('');
+      const remoteFiles = await this.listFilesRecursive('');
+      let pulled = 0;
+
+      for (const file of remoteFiles) {
+        const remote = await this.getFile(file.path);
+        if (!remote) continue;
+
+        // Check if local file exists and differs
+        let needUpdate = false;
+        try {
+          const localContent = await this.vault.adapter.read(file.path);
+          if (localContent !== remote.content) {
+            needUpdate = true;
+          }
+        } catch {
+          // File doesn't exist locally
+          needUpdate = true;
+        }
+
+        if (needUpdate) {
+          // Ensure parent directory exists
+          const dir = file.path.substring(0, file.path.lastIndexOf('/'));
+          if (dir) {
+            try { await this.vault.adapter.mkdir(dir); } catch {}
+          }
+          await this.vault.adapter.write(file.path, remote.content);
+          pulled++;
+        }
+      }
+
       return {
         success: true,
-        message: `Fetched ${files.length} files from remote`,
-        pulled: files.length,
+        message: `Pulled ${pulled} file(s) from remote`,
+        pulled,
       };
     } catch (error) {
       return {
         success: false,
-        message: 'Failed to fetch remote files',
+        message: `Pull failed: ${(error as Error).message}`,
         error: error as Error,
       };
     }
   }
 
   async push(): Promise<SyncResult> {
-    // Push is handled at file level by the sync engine
-    return {
-      success: true,
-      message: 'Push delegated to sync engine',
-    };
+    try {
+      // Get remote file list with SHAs
+      const remoteFiles = await this.listFilesRecursive('');
+      const remoteMap = new Map<string, string>(); // path -> sha
+      for (const f of remoteFiles) {
+        remoteMap.set(f.path, f.sha);
+      }
+
+      // Get local file list
+      const localFiles = await this.listLocalFiles('');
+      let pushed = 0;
+      const errors: string[] = [];
+
+      // Upload new/modified files
+      for (const localPath of localFiles) {
+        if (this.shouldIgnore(localPath)) continue;
+
+        try {
+          const localContent = await this.vault.adapter.read(localPath);
+          const remoteSha = remoteMap.get(localPath);
+
+          // Check if file needs update by comparing content
+          if (remoteSha) {
+            const remoteFile = await this.getFile(localPath);
+            if (remoteFile && remoteFile.content === localContent) {
+              remoteMap.delete(localPath); // Mark as processed
+              continue; // No change
+            }
+          }
+
+          await this.putFile(localPath, localContent, remoteSha);
+          pushed++;
+          remoteMap.delete(localPath); // Mark as processed
+        } catch (e) {
+          errors.push(`${localPath}: ${(e as Error).message}`);
+        }
+      }
+
+      // Delete remote files that don't exist locally
+      for (const [path, sha] of remoteMap) {
+        if (this.shouldIgnore(path)) continue;
+        try {
+          await this.deleteFile(path, sha);
+          pushed++;
+        } catch (e) {
+          errors.push(`delete ${path}: ${(e as Error).message}`);
+        }
+      }
+
+      if (errors.length > 0) {
+        return {
+          success: pushed > 0,
+          message: `Pushed ${pushed} file(s), ${errors.length} error(s)`,
+          pushed,
+          error: new Error(errors.join('\n')),
+        };
+      }
+
+      return {
+        success: true,
+        message: `Pushed ${pushed} file(s) to remote`,
+        pushed,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Push failed: ${(error as Error).message}`,
+        error: error as Error,
+      };
+    }
   }
 
   async sync(): Promise<SyncResult> {
-    // Full sync is delegated to the sync engine
-    // which handles file-level diff and conflict resolution
-    return {
-      success: true,
-      message: 'Sync delegated to sync engine',
-    };
+    try {
+      // Step 1: Push local changes
+      const pushResult = await this.push();
+      if (!pushResult.success) return pushResult;
+
+      return {
+        success: true,
+        message: `Sync completed. ${pushResult.message}`,
+        pushed: pushResult.pushed,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: `Sync failed: ${(error as Error).message}`,
+        error: error as Error,
+      };
+    }
   }
 
   async status(): Promise<SyncStatus> {
     try {
-      // Get latest commit on configured branch
-      const commits = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&per_page=1`
-      );
+      const remoteFiles = await this.listFilesRecursive('');
+      const remoteMap = new Map<string, string>();
+      for (const f of remoteFiles) {
+        remoteMap.set(f.path, f.sha);
+      }
+
+      const localFiles = await this.listLocalFiles('');
+      const changedFiles: FileChange[] = [];
+
+      for (const localPath of localFiles) {
+        if (this.shouldIgnore(localPath)) continue;
+
+        const remoteSha = remoteMap.get(localPath);
+        if (!remoteSha) {
+          changedFiles.push({ path: localPath, status: 'added' });
+        } else {
+          const localContent = await this.vault.adapter.read(localPath);
+          const remoteFile = await this.getFile(localPath);
+          if (remoteFile && remoteFile.content !== localContent) {
+            changedFiles.push({ path: localPath, status: 'modified' });
+          }
+          remoteMap.delete(localPath);
+        }
+      }
+
+      // Remaining remote files are deletions
+      for (const path of remoteMap.keys()) {
+        if (!this.shouldIgnore(path)) {
+          changedFiles.push({ path, status: 'deleted' });
+        }
+      }
 
       return {
-        ahead: 0, // tracked locally by sync engine
+        ahead: changedFiles.length,
         behind: 0,
-        changedFiles: [],
+        changedFiles,
         branch: this.config.branch,
         hasConflicts: false,
       };
@@ -107,9 +237,8 @@ export class ApiBackend extends SyncBackend {
     // Nothing to dispose
   }
 
-  // ===== Public API methods for the sync engine =====
+  // ===== File operations =====
 
-  /** Get a single file from remote */
   async getFile(path: string): Promise<{ content: string; sha: string } | null> {
     try {
       const data = await this.apiRequest('GET',
@@ -128,7 +257,6 @@ export class ApiBackend extends SyncBackend {
     }
   }
 
-  /** Create or update a file on remote */
   async putFile(path: string, content: string, sha?: string): Promise<string> {
     const body: any = {
       message: `sync: ${path}`,
@@ -143,7 +271,6 @@ export class ApiBackend extends SyncBackend {
     return data.content.sha;
   }
 
-  /** Delete a file on remote */
   async deleteFile(path: string, sha: string): Promise<void> {
     await this.apiRequest('DELETE',
       `/repos/${this.config.repo}/contents/${path}`, {
@@ -154,7 +281,6 @@ export class ApiBackend extends SyncBackend {
     );
   }
 
-  /** List files in a directory */
   async listFiles(path: string = ''): Promise<FileEntry[]> {
     try {
       const data = await this.apiRequest('GET',
@@ -173,7 +299,6 @@ export class ApiBackend extends SyncBackend {
     }
   }
 
-  /** Recursively list all files */
   async listFilesRecursive(path: string = ''): Promise<FileEntry[]> {
     const entries = await this.listFiles(path);
     const results: FileEntry[] = [];
@@ -189,15 +314,38 @@ export class ApiBackend extends SyncBackend {
     return results;
   }
 
-  /** Get the latest commit SHA for the branch */
-  async getLatestCommitSha(): Promise<string> {
-    const data = await this.apiRequest('GET',
-      `/repos/${this.config.repo}/commits?sha=${this.config.branch}&per_page=1`
-    );
-    return data[0]?.sha || '';
+  // ===== Private helpers =====
+
+  private async listLocalFiles(path: string): Promise<string[]> {
+    const results: string[] = [];
+    const listing = await this.vault.adapter.list(path);
+
+    for (const file of listing.files) {
+      if (!this.shouldIgnore(file)) {
+        results.push(file);
+      }
+    }
+
+    for (const dir of listing.folders) {
+      if (!this.shouldIgnore(dir)) {
+        const subFiles = await this.listLocalFiles(dir);
+        results.push(...subFiles);
+      }
+    }
+
+    return results;
   }
 
-  // ===== Private helpers =====
+  private shouldIgnore(path: string): boolean {
+    const ignorePatterns = [
+      '.obsidian/',
+      '.trash/',
+      '.git/',
+      '.DS_Store',
+      'Thumbs.db',
+    ];
+    return ignorePatterns.some(p => path.includes(p));
+  }
 
   private getDefaultBaseUrl(provider: ApiProvider): string {
     switch (provider) {
@@ -219,7 +367,6 @@ export class ApiBackend extends SyncBackend {
       'Accept': 'application/json',
     };
 
-    // GitLab uses different auth header
     if (this.config.provider === 'gitlab') {
       headers['Authorization'] = `Bearer ${this.config.token}`;
     }
