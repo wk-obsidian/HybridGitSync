@@ -1,5 +1,6 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
+import { SyncStateManager } from './state';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'skip';
 
@@ -17,10 +18,22 @@ export interface ConflictInfo {
 export class ConflictResolver {
   private vault: Vault;
   private backend: ApiBackend;
+  private stateManager: SyncStateManager;
 
-  constructor(vault: Vault, backend: ApiBackend) {
+  constructor(vault: Vault, backend: ApiBackend, stateManager: SyncStateManager) {
     this.vault = vault;
     this.backend = backend;
+    this.stateManager = stateManager;
+  }
+
+  /**
+   * Generate SHA-1 hash of content
+   */
+  private async sha1(content: string): Promise<string> {
+    const msgBuffer = new TextEncoder().encode(content);
+    const hashBuffer = await crypto.subtle.digest('SHA-1', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
 
   /**
@@ -73,11 +86,15 @@ export class ConflictResolver {
       case 'local':
         // Keep local version, push to remote
         await this.backend.putFile(conflict.path, conflict.localContent);
+        // Update sync state with local content hash
+        this.stateManager.setFileState(conflict.path, await this.sha1(conflict.localContent));
         break;
 
       case 'remote':
         // Keep remote version, write to local
         await this.vault.adapter.write(conflict.path, conflict.remoteContent);
+        // Update sync state with remote content hash
+        this.stateManager.setFileState(conflict.path, await this.sha1(conflict.remoteContent));
         break;
 
       case 'both':
@@ -91,12 +108,20 @@ export class ConflictResolver {
 
         await this.vault.adapter.write(localPath, conflict.localContent);
         await this.vault.adapter.write(remotePath, conflict.remoteContent);
+        // Update sync state for both files
+        this.stateManager.setFileState(localPath, await this.sha1(conflict.localContent));
+        this.stateManager.setFileState(remotePath, await this.sha1(conflict.remoteContent));
+        // Remove original path from state
+        this.stateManager.removeFileState(conflict.path);
         break;
 
       case 'skip':
-        // Do nothing
+        // Do nothing - keep the conflict for next sync
         break;
     }
+
+    // Save state after resolution
+    await this.stateManager.save();
   }
 
   /**

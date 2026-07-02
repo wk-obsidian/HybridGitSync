@@ -277,7 +277,10 @@ export default class HybridGitSyncPlugin extends Plugin {
    * Handle conflicts by showing the conflict resolution modal
    */
   private async handleConflicts(conflicts: ConflictInfo[]): Promise<void> {
-    const resolver = new ConflictResolver(this.vault, this.backend as ApiBackend);
+    // Get the stateManager from the API backend
+    const apiBackend = this.backend as ApiBackend;
+    const stateManager = apiBackend.getStateManager();
+    const resolver = new ConflictResolver(this.app.vault, apiBackend, stateManager);
 
     for (const conflict of conflicts) {
       const diff = resolver.generateDiff(conflict.localContent, conflict.remoteContent);

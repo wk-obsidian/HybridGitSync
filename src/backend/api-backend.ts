@@ -395,6 +395,13 @@ export class ApiBackend extends SyncBackend {
     // Nothing to dispose
   }
 
+  /**
+   * Get the sync state manager (for conflict resolution)
+   */
+  getStateManager(): SyncStateManager {
+    return this.stateManager;
+  }
+
   /** Get the current branch (may be auto-corrected) */
   getBranch(): string {
     return this.config.branch;
