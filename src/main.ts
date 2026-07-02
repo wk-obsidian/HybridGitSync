@@ -456,6 +456,63 @@ export default class HybridGitSyncPlugin extends Plugin {
       name: 'Diff current file',
       callback: () => this.diffCurrentFile(),
     });
+
+    this.addCommand({
+      id: 'restore-file',
+      name: 'Restore file from remote',
+      callback: () => this.restoreCurrentFile(),
+    });
+
+    this.addCommand({
+      id: 'switch-branch',
+      name: 'Switch branch',
+      callback: () => this.switchBranch(),
+    });
+  }
+
+  // ===== Version Restore =====
+
+  private async restoreCurrentFile(): Promise<void> {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile) {
+      this.showNotice('No active file');
+      return;
+    }
+
+    if (!(this.backend instanceof ApiBackend)) {
+      this.showNotice('Restore is only available in API mode');
+      return;
+    }
+
+    const remoteFile = await (this.backend as ApiBackend).getFile(activeFile.path);
+    if (!remoteFile) {
+      this.showNotice('File not found on remote');
+      return;
+    }
+
+    await this.app.vault.adapter.write(activeFile.path, remoteFile.content);
+    this.showNotice(`Restored ${activeFile.path} from remote`);
+  }
+
+  // ===== Branch Management =====
+
+  private async switchBranch(): Promise<void> {
+    if (!(this.backend instanceof ApiBackend)) {
+      this.showNotice('Branch switching is only available in API mode');
+      return;
+    }
+
+    const branches = await (this.backend as ApiBackend).getBranches();
+    if (branches.length === 0) {
+      this.showNotice('No branches found');
+      return;
+    }
+
+    // Show branch selection
+    const currentBranch = (this.backend as ApiBackend).getBranch();
+    const notice = new Notice(`Branches:\n${branches.map(b =>
+      `${b === currentBranch ? '● ' : '  '}${b}`
+    ).join('\n')}\n\nCurrent: ${currentBranch}`, 10000);
   }
 
   // ===== Views =====
