@@ -14,8 +14,7 @@ export class GitignoreRules {
   ];
 
   constructor() {
-    // Add built-in patterns
-    this.builtInPatterns.forEach(p => this.addPattern(p));
+    // Built-in patterns are only used as fallback when no .gitignore exists
   }
 
   /**
@@ -29,6 +28,33 @@ export class GitignoreRules {
         this.addPattern(trimmed);
       }
     }
+  }
+
+  /**
+   * Use built-in patterns as fallback
+   */
+  useBuiltInPatterns(): void {
+    this.builtInPatterns.forEach(p => this.addPattern(p));
+  }
+
+  /**
+   * Get default .gitignore content
+   */
+  getDefaultContent(): string {
+    return `# Obsidian
+.obsidian/
+.trash/
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Temp files
+*.tmp
+*.bak
+`;
   }
 
   /**

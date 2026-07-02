@@ -151,8 +151,18 @@ export default class HybridGitSyncPlugin extends Plugin {
       this.gitignore.addRules(content);
       this.log('Loaded .gitignore rules');
     } catch {
-      // No .gitignore file, use built-in rules only
-      this.log('No .gitignore found, using built-in rules');
+      // No .gitignore file - create one with default rules
+      this.log('No .gitignore found, creating with default rules');
+      const defaultContent = this.gitignore.getDefaultContent();
+      try {
+        await this.app.vault.adapter.write('.gitignore', defaultContent);
+        this.gitignore.addRules(defaultContent);
+        this.showNotice('Created .gitignore with default rules');
+      } catch (error) {
+        console.error('[HybridGitSync] Failed to create .gitignore:', error);
+        // Fallback to built-in patterns
+        this.gitignore.useBuiltInPatterns();
+      }
     }
   }
 
