@@ -162,7 +162,6 @@ export class SyncStateManager {
           actions.pullFromRemote.push(path);
         } else if (existsLocal && existsRemote) {
           // New on both sides - need to compare actual content
-          // (hashes are in different formats, so we can't compare directly)
           actions.needsContentComparison.push(path);
         }
       } else {
@@ -170,6 +169,14 @@ export class SyncStateManager {
         const lastSha = lastKnown.get(path)!;
         const localChanged = existsLocal && currentLocal.get(path) !== lastSha;
         const remoteChanged = existsRemote && currentRemote.get(path) !== lastSha;
+
+        console.log(`[SyncState] ${path}:`, {
+          lastSha: lastSha?.substring(0, 8),
+          localHash: currentLocal.get(path)?.substring(0, 8),
+          remoteSha: currentRemote.get(path)?.substring(0, 8),
+          localChanged,
+          remoteChanged,
+        });
 
         if (existsLocal && existsRemote) {
           if (localChanged && remoteChanged) {

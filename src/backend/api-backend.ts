@@ -243,7 +243,22 @@ export class ApiBackend extends SyncBackend {
       console.log('[HybridGitSync] Local files:', localMap.size);
 
       // Step 6: Detect local changes
+      console.log('[HybridGitSync] Detecting changes...');
+      console.log('[HybridGitSync] Local map:', Array.from(localMap.entries()).slice(0, 5));
+      console.log('[HybridGitSync] Remote map:', Array.from(remoteMap.entries()).slice(0, 5));
+      console.log('[HybridGitSync] Cached remote SHAs:', Array.from(cachedRemoteShas.entries()).slice(0, 5));
+      console.log('[HybridGitSync] Stored files:', Array.from(this.stateManager.getKnownFiles().entries()).slice(0, 5));
+
       const actions = this.stateManager.detectChanges(localMap, remoteMap);
+
+      console.log('[HybridGitSync] Detected actions:', {
+        push: actions.pushToRemote.length,
+        pull: actions.pullFromRemote.length,
+        deleteRemote: actions.deleteFromRemote.length,
+        deleteLocal: actions.deleteFromLocal.length,
+        conflicts: actions.conflicts.length,
+        needsComparison: actions.needsContentComparison.length,
+      });
 
       // Step 7: Merge remote changes into actions
       // New remote files that don't exist locally → pull

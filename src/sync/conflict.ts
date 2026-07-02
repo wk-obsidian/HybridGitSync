@@ -97,11 +97,24 @@ export class ConflictResolver {
           // Keep local version, push to remote (with retry)
           let retries = 3;
           let success = false;
+          let currentSha: string | undefined;
+
+          // Try to use cached SHA first
+          const cachedSha = this.stateManager.getRemoteSha(conflict.path);
+          if (cachedSha) {
+            console.log('[ConflictResolver] Using cached remote SHA:', cachedSha);
+            currentSha = cachedSha;
+          }
+
           while (retries > 0 && !success) {
-            console.log('[ConflictResolver] Getting remote file SHA... (retries:', retries, ')');
-            const remoteFile = await this.backend.getFile(conflict.path);
-            const currentSha = remoteFile?.sha;
-            console.log('[ConflictResolver] Current remote SHA:', currentSha);
+            // If no cached SHA, fetch from remote
+            if (!currentSha) {
+              console.log('[ConflictResolver] Fetching remote file SHA... (retries:', retries, ')');
+              const remoteFile = await this.backend.getFile(conflict.path);
+              currentSha = remoteFile?.sha;
+              console.log('[ConflictResolver] Current remote SHA:', currentSha);
+            }
+
             console.log('[ConflictResolver] Pushing local content to remote...');
             try {
               const newSha = await this.backend.putFile(conflict.path, conflict.localContent, currentSha);
@@ -114,6 +127,7 @@ export class ConflictResolver {
               success = true;
             } catch (e) {
               retries--;
+              currentSha = undefined; // Reset SHA to force re-fetch
               if (retries === 0) throw e;
               console.warn('[ConflictResolver] Retry due to conflict...');
               await new Promise(r => setTimeout(r, 1000)); // Wait 1 second
