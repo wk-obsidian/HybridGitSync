@@ -59,13 +59,16 @@ export default class HybridGitSyncPlugin extends Plugin {
       await this.performSync();
     });
 
-    this.addRibbonIcon('history', 'View History', () => {
-      this.showHistoryView();
-    });
+    // Only show history and changes icons in API mode
+    if (this.backend instanceof ApiBackend) {
+      this.addRibbonIcon('history', 'View History', () => {
+        this.showHistoryView();
+      });
 
-    this.addRibbonIcon('git-branch', 'View Changes', () => {
-      this.showChangesView();
-    });
+      this.addRibbonIcon('git-branch', 'View Changes', () => {
+        this.showChangesView();
+      });
+    }
 
     // Setup auto sync
     this.setupAutoSync();
