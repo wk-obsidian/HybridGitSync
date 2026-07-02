@@ -237,7 +237,7 @@ export class ApiBackend extends SyncBackend {
       for (const path of localFiles) {
         try {
           const content = await this.vault.adapter.read(path);
-          localMap.set(path, await this.sha1(content));
+          localMap.set(path, await this.gitBlobSha1(content));
         } catch {}
       }
       console.log('[HybridGitSync] Local files:', localMap.size);
@@ -301,7 +301,7 @@ export class ApiBackend extends SyncBackend {
 
           if (localContent === remoteFile.content) {
             // Same content - no action needed, just update state
-            const contentHash = await this.sha1(localContent);
+            const contentHash = await this.gitBlobSha1(localContent);
             this.stateManager.setFileState(path, contentHash);
             console.log('[HybridGitSync] Same content on both sides:', path);
           } else {
@@ -335,7 +335,7 @@ export class ApiBackend extends SyncBackend {
           }
           await this.vault.adapter.write(path, remoteFile.content);
           // Store content hash (SHA-1)
-          const contentHash = await this.sha1(remoteFile.content);
+          const contentHash = await this.gitBlobSha1(remoteFile.content);
           this.stateManager.setFileState(path, contentHash);
           pulled++;
           console.log('[HybridGitSync] Downloaded:', path);
@@ -352,7 +352,7 @@ export class ApiBackend extends SyncBackend {
           const sha = remoteMap.get(path);
           await this.putFile(path, content, sha);
           // Store content hash (SHA-1)
-          const contentHash = await this.sha1(content);
+          const contentHash = await this.gitBlobSha1(content);
           this.stateManager.setFileState(path, contentHash);
           pushed++;
           console.log('[HybridGitSync] Uploaded:', path);
@@ -622,11 +622,20 @@ export class ApiBackend extends SyncBackend {
   // ===== Private helpers =====
 
   /**
-   * Generate SHA-1 hash of content (for change detection)
+   * Generate Git-compatible blob SHA-1
+   * Git computes SHA as: SHA1("blob " + content.length + "\0" + content)
    */
-  private async sha1(content: string): Promise<string> {
-    const msgBuffer = new TextEncoder().encode(content);
-    const hashBuffer = await crypto.subtle.digest('SHA-1', msgBuffer);
+  private async gitBlobSha1(content: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const contentBytes = encoder.encode(content);
+    const header = encoder.encode(`blob ${contentBytes.length}\0`);
+
+    // Combine header and content
+    const combined = new Uint8Array(header.length + contentBytes.length);
+    combined.set(header);
+    combined.set(contentBytes, header.length);
+
+    const hashBuffer = await crypto.subtle.digest('SHA-1', combined);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }

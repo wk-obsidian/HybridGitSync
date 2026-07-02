@@ -27,11 +27,18 @@ export class ConflictResolver {
   }
 
   /**
-   * Generate SHA-1 hash of content
+   * Generate Git-compatible blob SHA-1
    */
-  private async sha1(content: string): Promise<string> {
-    const msgBuffer = new TextEncoder().encode(content);
-    const hashBuffer = await crypto.subtle.digest('SHA-1', msgBuffer);
+  private async gitBlobSha1(content: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const contentBytes = encoder.encode(content);
+    const header = encoder.encode(`blob ${contentBytes.length}\0`);
+
+    const combined = new Uint8Array(header.length + contentBytes.length);
+    combined.set(header);
+    combined.set(contentBytes, header.length);
+
+    const hashBuffer = await crypto.subtle.digest('SHA-1', combined);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   }
@@ -87,14 +94,14 @@ export class ConflictResolver {
         // Keep local version, push to remote
         await this.backend.putFile(conflict.path, conflict.localContent);
         // Update sync state with local content hash
-        this.stateManager.setFileState(conflict.path, await this.sha1(conflict.localContent));
+        this.stateManager.setFileState(conflict.path, await this.gitBlobSha1(conflict.localContent));
         break;
 
       case 'remote':
         // Keep remote version, write to local
         await this.vault.adapter.write(conflict.path, conflict.remoteContent);
         // Update sync state with remote content hash
-        this.stateManager.setFileState(conflict.path, await this.sha1(conflict.remoteContent));
+        this.stateManager.setFileState(conflict.path, await this.gitBlobSha1(conflict.remoteContent));
         break;
 
       case 'both':
@@ -109,8 +116,8 @@ export class ConflictResolver {
         await this.vault.adapter.write(localPath, conflict.localContent);
         await this.vault.adapter.write(remotePath, conflict.remoteContent);
         // Update sync state for both files
-        this.stateManager.setFileState(localPath, await this.sha1(conflict.localContent));
-        this.stateManager.setFileState(remotePath, await this.sha1(conflict.remoteContent));
+        this.stateManager.setFileState(localPath, await this.gitBlobSha1(conflict.localContent));
+        this.stateManager.setFileState(remotePath, await this.gitBlobSha1(conflict.remoteContent));
         // Remove original path from state
         this.stateManager.removeFileState(conflict.path);
         break;
