@@ -292,6 +292,7 @@ export class ApiBackend extends SyncBackend {
       }
 
       // Step 8: Handle files that need content comparison (new on both sides)
+      const isFirstSync = cachedRemoteShas.size === 0;
       for (const path of actions.needsContentComparison) {
         if (this.shouldIgnore(path)) continue;
         try {
@@ -304,6 +305,10 @@ export class ApiBackend extends SyncBackend {
             const contentHash = await this.gitBlobSha1(localContent);
             this.stateManager.setFileState(path, contentHash);
             console.log('[HybridGitSync] Same content on both sides:', path);
+          } else if (isFirstSync) {
+            // First sync with no baseline - use remote as source of truth
+            console.log('[HybridGitSync] First sync, using remote version:', path);
+            actions.pullFromRemote.push(path);
           } else {
             // Different content - conflict
             actions.conflicts.push(path);
@@ -401,8 +406,8 @@ export class ApiBackend extends SyncBackend {
       await this.stateManager.save();
 
       const message = `Sync completed: pulled ${pulled}, pushed ${pushed}, deleted ${deleted}` +
-        (actions.conflicts.length > 0 ? `, ${actions.conflicts.length} conflict(s)` : '') +
-        (errors.length > 0 ? `, ${errors.length} error(s)` : '');
+        (actions.conflicts.length > 0 ? `, conflicts ${actions.conflicts.length}` : '') +
+        (errors.length > 0 ? `, errors ${errors.length}` : '');
 
       return {
         success: errors.length === 0 && actions.conflicts.length === 0,
