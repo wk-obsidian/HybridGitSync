@@ -92,16 +92,21 @@ export class ConflictResolver {
     switch (resolution) {
       case 'local':
         // Keep local version, push to remote
-        await this.backend.putFile(conflict.path, conflict.localContent);
+        const newSha = await this.backend.putFile(conflict.path, conflict.localContent);
         // Update sync state with local content hash
-        this.stateManager.setFileState(conflict.path, await this.gitBlobSha1(conflict.localContent));
+        const localHash = await this.gitBlobSha1(conflict.localContent);
+        this.stateManager.setFileState(conflict.path, localHash);
+        // Update cached remote SHA
+        this.stateManager.setRemoteSha(conflict.path, newSha);
         break;
 
       case 'remote':
         // Keep remote version, write to local
         await this.vault.adapter.write(conflict.path, conflict.remoteContent);
         // Update sync state with remote content hash
-        this.stateManager.setFileState(conflict.path, await this.gitBlobSha1(conflict.remoteContent));
+        const remoteHash = await this.gitBlobSha1(conflict.remoteContent);
+        this.stateManager.setFileState(conflict.path, remoteHash);
+        // Remote SHA stays the same (we're using remote's version)
         break;
 
       case 'both':
@@ -120,6 +125,7 @@ export class ConflictResolver {
         this.stateManager.setFileState(remotePath, await this.gitBlobSha1(conflict.remoteContent));
         // Remove original path from state
         this.stateManager.removeFileState(conflict.path);
+        this.stateManager.removeRemoteSha(conflict.path);
         break;
 
       case 'skip':
