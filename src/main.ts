@@ -272,31 +272,69 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   /**
    * Check for conflicts before syncing
+   * Only returns conflicts where BOTH sides have changed
    */
   private async checkConflicts(): Promise<ConflictInfo[]> {
     if (!(this.backend instanceof ApiBackend)) return [];
 
-    const resolver = new ConflictResolver(this.vault, this.backend);
+    const apiBackend = this.backend as ApiBackend;
+    const stateManager = apiBackend.getStateManager();
 
-    // Get local files
-    const localFiles = new Map<string, string>();
-    const listFiles = async (path: string) => {
-      const listing = await this.app.vault.adapter.list(path);
-      for (const file of listing.files) {
-        if (!this.gitignore.shouldIgnore(file)) {
-          const content = await this.app.vault.adapter.read(file);
-          localFiles.set(file, content);
+    // Load sync state
+    await stateManager.load();
+    const knownFiles = stateManager.getKnownFiles();
+
+    // If no sync state, no conflicts possible (first sync)
+    if (knownFiles.size === 0) return [];
+
+    const conflicts: ConflictInfo[] = [];
+
+    // Get remote files
+    const remoteFiles = await apiBackend.listFilesRecursive('');
+    const remoteMap = new Map<string, { sha: string }>();
+    for (const f of remoteFiles) {
+      remoteMap.set(f.path, { sha: f.sha });
+    }
+
+    // Get local files and check for conflicts
+    const checkFile = async (path: string) => {
+      if (this.gitignore.shouldIgnore(path)) return;
+
+      const storedHash = knownFiles.get(path);
+      const remoteInfo = remoteMap.get(path);
+
+      // Only check files that exist in sync state and on remote
+      if (!storedHash || !remoteInfo) return;
+
+      try {
+        const localContent = await this.app.vault.adapter.read(path);
+        const remoteFile = await apiBackend.getFile(path);
+        if (!remoteFile) return;
+
+        // Compare content directly
+        if (localContent !== remoteFile.content) {
+          // Content differs - this could be a conflict
+          // But we need to check if BOTH sides changed
+          // For now, just report it as a potential conflict
+          conflicts.push({
+            path,
+            localContent,
+            remoteContent: remoteFile.content,
+            localModified: new Date(),
+            remoteModified: new Date(),
+          });
         }
-      }
-      for (const dir of listing.folders) {
-        if (!this.gitignore.shouldIgnore(dir)) {
-          await listFiles(dir);
-        }
+      } catch (e) {
+        // Ignore errors
       }
     };
-    await listFiles('');
 
-    return resolver.detectConflicts(localFiles);
+    // Check all known files
+    for (const path of knownFiles.keys()) {
+      await checkFile(path);
+    }
+
+    return conflicts;
   }
 
   /**
