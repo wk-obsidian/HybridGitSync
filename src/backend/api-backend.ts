@@ -194,15 +194,44 @@ export class ApiBackend extends SyncBackend {
       await this.stateManager.load();
       console.log('[HybridGitSync] Last sync:', this.stateManager.getLastSyncTime());
 
-      // Step 2: Get current remote file list
-      const remoteFiles = await this.listFilesRecursive('');
-      const remoteMap = new Map<string, string>(); // path -> sha
-      for (const f of remoteFiles) {
-        remoteMap.set(f.path, f.sha);
-      }
+      // Step 2: Get current remote file tree (single API call)
+      const remoteMap = await this.getRemoteTree();
       console.log('[HybridGitSync] Remote files:', remoteMap.size);
 
-      // Step 3: Get current local file list with content hash
+      // Step 3: Get cached remote SHAs to detect remote changes
+      const cachedRemoteShas = this.stateManager.getAllRemoteShas();
+      console.log('[HybridGitSync] Cached remote SHAs:', cachedRemoteShas.size);
+
+      // Step 4: Determine which remote files actually changed
+      const changedRemoteFiles = new Set<string>();
+      const newRemoteFiles = new Set<string>();
+      const deletedRemoteFiles = new Set<string>();
+
+      // Find new and modified remote files
+      for (const [path, sha] of remoteMap) {
+        if (this.shouldIgnore(path)) continue;
+        const cachedSha = cachedRemoteShas.get(path);
+        if (!cachedSha) {
+          newRemoteFiles.add(path);
+        } else if (cachedSha !== sha) {
+          changedRemoteFiles.add(path);
+        }
+      }
+
+      // Find deleted remote files
+      for (const [path] of cachedRemoteShas) {
+        if (!remoteMap.has(path) && !this.shouldIgnore(path)) {
+          deletedRemoteFiles.add(path);
+        }
+      }
+
+      console.log('[HybridGitSync] Remote changes:', {
+        new: newRemoteFiles.size,
+        modified: changedRemoteFiles.size,
+        deleted: deletedRemoteFiles.size,
+      });
+
+      // Step 5: Get current local file list with content hash
       const localFiles = await this.listLocalFiles('');
       const localMap = new Map<string, string>(); // path -> content hash
       for (const path of localFiles) {
@@ -213,10 +242,56 @@ export class ApiBackend extends SyncBackend {
       }
       console.log('[HybridGitSync] Local files:', localMap.size);
 
-      // Step 4: Detect changes
+      // Step 6: Detect local changes
       const actions = this.stateManager.detectChanges(localMap, remoteMap);
 
-      // Step 4.5: Handle files that need content comparison (new on both sides)
+      // Step 7: Merge remote changes into actions
+      // New remote files that don't exist locally → pull
+      for (const path of newRemoteFiles) {
+        if (!localMap.has(path)) {
+          if (!actions.pullFromRemote.includes(path)) {
+            actions.pullFromRemote.push(path);
+          }
+        } else {
+          // Exists on both sides - need content comparison
+          if (!actions.needsContentComparison.includes(path)) {
+            actions.needsContentComparison.push(path);
+          }
+        }
+      }
+
+      // Modified remote files → pull (or conflict if also modified locally)
+      for (const path of changedRemoteFiles) {
+        const localChanged = localMap.has(path) &&
+          this.stateManager.getFileState(path) !== localMap.get(path);
+        if (localChanged) {
+          if (!actions.conflicts.includes(path)) {
+            actions.conflicts.push(path);
+          }
+        } else {
+          if (!actions.pullFromRemote.includes(path)) {
+            actions.pullFromRemote.push(path);
+          }
+        }
+      }
+
+      // Deleted remote files → delete locally
+      for (const path of deletedRemoteFiles) {
+        if (localMap.has(path)) {
+          const localChanged = this.stateManager.getFileState(path) !== localMap.get(path);
+          if (localChanged) {
+            if (!actions.conflicts.includes(path)) {
+              actions.conflicts.push(path);
+            }
+          } else {
+            if (!actions.deleteFromLocal.includes(path)) {
+              actions.deleteFromLocal.push(path);
+            }
+          }
+        }
+      }
+
+      // Step 8: Handle files that need content comparison (new on both sides)
       for (const path of actions.needsContentComparison) {
         if (this.shouldIgnore(path)) continue;
         try {
@@ -247,7 +322,7 @@ export class ApiBackend extends SyncBackend {
         conflicts: actions.conflicts.length,
       });
 
-      // Step 5: Pull new/modified remote files
+      // Step 9: Pull new/modified remote files
       for (const path of actions.pullFromRemote) {
         if (this.shouldIgnore(path)) continue;
         try {
@@ -259,7 +334,7 @@ export class ApiBackend extends SyncBackend {
             try { await this.vault.adapter.mkdir(dir); } catch {}
           }
           await this.vault.adapter.write(path, remoteFile.content);
-          // Store content hash (SHA-1) instead of Git blob SHA
+          // Store content hash (SHA-1)
           const contentHash = await this.sha1(remoteFile.content);
           this.stateManager.setFileState(path, contentHash);
           pulled++;
@@ -269,14 +344,14 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
-      // Step 6: Push new/modified local files
+      // Step 10: Push new/modified local files
       for (const path of actions.pushToRemote) {
         if (this.shouldIgnore(path)) continue;
         try {
           const content = await this.vault.adapter.read(path);
           const sha = remoteMap.get(path);
           await this.putFile(path, content, sha);
-          // Store content hash (SHA-1) instead of Git blob SHA
+          // Store content hash (SHA-1)
           const contentHash = await this.sha1(content);
           this.stateManager.setFileState(path, contentHash);
           pushed++;
@@ -286,7 +361,7 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
-      // Step 7: Delete files that were deleted locally
+      // Step 11: Delete files that were deleted locally
       for (const path of actions.deleteFromRemote) {
         if (this.shouldIgnore(path)) continue;
         try {
@@ -302,7 +377,7 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
-      // Step 8: Delete files that were deleted remotely
+      // Step 12: Delete files that were deleted remotely
       for (const path of actions.deleteFromLocal) {
         if (this.shouldIgnore(path)) continue;
         try {
@@ -315,7 +390,14 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
-      // Step 9: Save sync state
+      // Step 13: Cache remote SHAs for next sync
+      const remoteShas: Record<string, string> = {};
+      for (const [path, sha] of remoteMap) {
+        remoteShas[path] = sha;
+      }
+      this.stateManager.setAllRemoteShas(remoteShas);
+
+      // Step 14: Save sync state
       await this.stateManager.save();
 
       const message = `Sync completed: pulled ${pulled}, pushed ${pushed}, deleted ${deleted}` +
@@ -497,6 +579,44 @@ export class ApiBackend extends SyncBackend {
       }
     }
     return results;
+  }
+
+  /**
+   * Get remote file tree with SHAs using Git Tree API (single API call)
+   * This is much more efficient than fetching each file individually
+   */
+  async getRemoteTree(): Promise<Map<string, string>> {
+    const fileMap = new Map<string, string>(); // path -> sha
+
+    try {
+      // Get the tree SHA for the branch
+      const branchInfo = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+      );
+      const treeSha = branchInfo.object.sha;
+
+      // Get the entire tree recursively
+      const tree = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/git/trees/${treeSha}?recursive=1`
+      );
+
+      if (tree.tree) {
+        for (const item of tree.tree) {
+          if (item.type === 'blob') { // Only files, not directories
+            fileMap.set(item.path, item.sha);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get remote tree:', error);
+      // Fallback to listing files individually
+      const files = await this.listFilesRecursive('');
+      for (const f of files) {
+        fileMap.set(f.path, f.sha);
+      }
+    }
+
+    return fileMap;
   }
 
   // ===== Private helpers =====

@@ -4,7 +4,8 @@ const STATE_FILE = '.obsidian/plugins/hybrid-git-sync/.sync-state.json';
 
 export interface SyncState {
   lastSyncTime: string;
-  files: Record<string, string>; // path -> sha (or content hash)
+  files: Record<string, string>; // path -> content hash
+  remoteShas: Record<string, string>; // path -> remote git blob SHA (cached)
 }
 
 /**
@@ -17,7 +18,7 @@ export class SyncStateManager {
 
   constructor(vault: Vault) {
     this.vault = vault;
-    this.state = { lastSyncTime: '', files: {} };
+    this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
   }
 
   /**
@@ -29,7 +30,7 @@ export class SyncStateManager {
       this.state = JSON.parse(content);
     } catch {
       // No state file yet, start fresh
-      this.state = { lastSyncTime: '', files: {} };
+      this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
     }
   }
 
@@ -78,7 +79,42 @@ export class SyncStateManager {
    * Clear all state
    */
   clear(): void {
-    this.state = { lastSyncTime: '', files: {} };
+    this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
+  }
+
+  /**
+   * Get cached remote SHA for a file
+   */
+  getRemoteSha(path: string): string | undefined {
+    return this.state.remoteShas[path];
+  }
+
+  /**
+   * Get all cached remote SHAs
+   */
+  getAllRemoteShas(): Map<string, string> {
+    return new Map(Object.entries(this.state.remoteShas));
+  }
+
+  /**
+   * Update cached remote SHA for a file
+   */
+  setRemoteSha(path: string, sha: string): void {
+    this.state.remoteShas[path] = sha;
+  }
+
+  /**
+   * Remove cached remote SHA
+   */
+  removeRemoteSha(path: string): void {
+    delete this.state.remoteShas[path];
+  }
+
+  /**
+   * Update all remote SHAs at once
+   */
+  setAllRemoteShas(shas: Record<string, string>): void {
+    this.state.remoteShas = shas;
   }
 
   /**
