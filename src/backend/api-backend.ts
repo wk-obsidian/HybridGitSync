@@ -395,7 +395,9 @@ export class ApiBackend extends SyncBackend {
             pulled++;
             this.log('Downloaded:', path);
           } catch (e) {
-            errors.push(`pull ${path}: ${(e as Error).message}`);
+            const errMsg = `pull ${path}: ${(e as Error).message}`;
+            errors.push(errMsg);
+            console.error('[HybridGitSync]', errMsg);
           }
         });
 
@@ -408,6 +410,14 @@ export class ApiBackend extends SyncBackend {
         .map(async (path) => {
           try {
             const content = await this.vault.adapter.read(path);
+
+            // Check file size before uploading
+            if (this.isFileTooLarge(content)) {
+              const size = new TextEncoder().encode(content).length;
+              console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize(size)})`);
+              return;
+            }
+
             const sha = remoteMap.get(path);
             const newSha = await this.putFile(path, content, sha);
             // Store content hash (SHA-1)
@@ -418,7 +428,9 @@ export class ApiBackend extends SyncBackend {
             pushed++;
             this.log('Uploaded:', path);
           } catch (e) {
-            errors.push(`push ${path}: ${(e as Error).message}`);
+            const errMsg = `push ${path}: ${(e as Error).message}`;
+            errors.push(errMsg);
+            console.error('[HybridGitSync]', errMsg);
           }
         });
 
