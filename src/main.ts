@@ -272,7 +272,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   /**
    * Check for conflicts before syncing
-   * Only returns conflicts where BOTH sides have changed
+   * Only returns conflicts where BOTH sides have changed since last sync
    */
   private async checkConflicts(): Promise<ConflictInfo[]> {
     if (!(this.backend instanceof ApiBackend)) return [];
@@ -287,51 +287,51 @@ export default class HybridGitSyncPlugin extends Plugin {
     // If no sync state, no conflicts possible (first sync)
     if (knownFiles.size === 0) return [];
 
+    // Get cached remote SHAs
+    const cachedRemoteShas = stateManager.getAllRemoteShas();
+    if (cachedRemoteShas.size === 0) return [];
+
     const conflicts: ConflictInfo[] = [];
 
-    // Get remote files
-    const remoteFiles = await apiBackend.listFilesRecursive('');
-    const remoteMap = new Map<string, { sha: string }>();
-    for (const f of remoteFiles) {
-      remoteMap.set(f.path, { sha: f.sha });
-    }
+    // Get current remote file tree
+    const remoteMap = await apiBackend.getRemoteTree();
 
-    // Get local files and check for conflicts
-    const checkFile = async (path: string) => {
-      if (this.gitignore.shouldIgnore(path)) return;
+    // Check each known file
+    for (const [path, storedHash] of knownFiles) {
+      if (this.gitignore.shouldIgnore(path)) continue;
 
-      const storedHash = knownFiles.get(path);
-      const remoteInfo = remoteMap.get(path);
+      const remoteSha = remoteMap.get(path);
+      const cachedSha = cachedRemoteShas.get(path);
 
-      // Only check files that exist in sync state and on remote
-      if (!storedHash || !remoteInfo) return;
+      // Skip if file doesn't exist on remote or no cached SHA
+      if (!remoteSha || !cachedSha) continue;
 
+      // Check if remote changed
+      const remoteChanged = remoteSha !== cachedSha;
+      if (!remoteChanged) continue;
+
+      // Remote changed - check if local also changed
       try {
         const localContent = await this.app.vault.adapter.read(path);
-        const remoteFile = await apiBackend.getFile(path);
-        if (!remoteFile) return;
+        const localHash = await apiBackend.gitBlobSha1(localContent);
+        const localChanged = localHash !== storedHash;
 
-        // Compare content directly
-        if (localContent !== remoteFile.content) {
-          // Content differs - this could be a conflict
-          // But we need to check if BOTH sides changed
-          // For now, just report it as a potential conflict
-          conflicts.push({
-            path,
-            localContent,
-            remoteContent: remoteFile.content,
-            localModified: new Date(),
-            remoteModified: new Date(),
-          });
+        if (localChanged) {
+          // Both sides changed - this is a real conflict
+          const remoteFile = await apiBackend.getFile(path);
+          if (remoteFile && localContent !== remoteFile.content) {
+            conflicts.push({
+              path,
+              localContent,
+              remoteContent: remoteFile.content,
+              localModified: new Date(),
+              remoteModified: new Date(),
+            });
+          }
         }
       } catch (e) {
         // Ignore errors
       }
-    };
-
-    // Check all known files
-    for (const path of knownFiles.keys()) {
-      await checkFile(path);
     }
 
     return conflicts;

@@ -772,7 +772,7 @@ export class ApiBackend extends SyncBackend {
    * Generate Git-compatible blob SHA-1
    * Git computes SHA as: SHA1("blob " + content.length + "\0" + content)
    */
-  private async gitBlobSha1(content: string): Promise<string> {
+  async gitBlobSha1(content: string): Promise<string> {
     const encoder = new TextEncoder();
     const contentBytes = encoder.encode(content);
     const header = encoder.encode(`blob ${contentBytes.length}\0`);
