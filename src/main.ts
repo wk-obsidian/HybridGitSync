@@ -22,6 +22,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   network!: NetworkStatus;
   gitignore!: GitignoreRules;
   private autoSyncInterval: number | null = null;
+  private isResolvingConflicts = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -195,6 +196,12 @@ export default class HybridGitSyncPlugin extends Plugin {
       hasStatusBar: !!this.statusBar,
     });
 
+    // Don't sync while resolving conflicts
+    if (this.isResolvingConflicts) {
+      this.log('Sync skipped: resolving conflicts');
+      return;
+    }
+
     if (!this.settings.remoteUrl) {
       this.showNotice('Please configure remote repository in settings.');
       return;
@@ -294,26 +301,42 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   /**
    * Handle conflicts by showing the conflict resolution modal
+   * Only shows one modal at a time, pauses sync queue
    */
   private async handleConflicts(conflicts: ConflictInfo[]): Promise<void> {
+    // Set flag to prevent sync while resolving
+    this.isResolvingConflicts = true;
+    this.syncQueue.clear();
+    this.statusBar.setState('conflict', `${conflicts.length} conflict(s)`);
+
     // Get the stateManager from the API backend
     const apiBackend = this.backend as ApiBackend;
     const stateManager = apiBackend.getStateManager();
     const resolver = new ConflictResolver(this.app.vault, apiBackend, stateManager);
 
-    for (const conflict of conflicts) {
+    // Process conflicts one at a time
+    let current = 0;
+    const processNext = () => {
+      if (current >= conflicts.length) {
+        // All conflicts resolved
+        this.isResolvingConflicts = false;
+        this.showNotice('All conflicts resolved');
+        this.performSync();
+        return;
+      }
+
+      const conflict = conflicts[current];
       const diff = resolver.generateDiff(conflict.localContent, conflict.remoteContent);
 
       new ConflictModal(this.app, conflict, diff, async (resolution) => {
         await resolver.resolve(conflict, resolution);
         this.showNotice(`Resolved ${conflict.path}: ${resolution}`);
-
-        // Continue sync after all conflicts resolved
-        if (conflicts.indexOf(conflict) === conflicts.length - 1) {
-          await this.performSync();
-        }
+        current++;
+        processNext();
       }).open();
-    }
+    };
+
+    processNext();
   }
 
   // ===== Auto Sync =====
