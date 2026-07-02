@@ -212,6 +212,29 @@ export class ApiBackend extends SyncBackend {
 
       // Step 4: Detect changes
       const actions = this.stateManager.detectChanges(localMap, remoteMap);
+
+      // Step 4.5: Handle files that need content comparison (new on both sides)
+      for (const path of actions.needsContentComparison) {
+        if (this.shouldIgnore(path)) continue;
+        try {
+          const localContent = await this.vault.adapter.read(path);
+          const remoteFile = await this.getFile(path);
+          if (!remoteFile) continue;
+
+          if (localContent === remoteFile.content) {
+            // Same content - no action needed, just update state
+            this.stateManager.setFileState(path, remoteMap.get(path)!);
+            console.log('[HybridGitSync] Same content on both sides:', path);
+          } else {
+            // Different content - conflict
+            actions.conflicts.push(path);
+            console.log('[HybridGitSync] Conflict (different content):', path);
+          }
+        } catch (e) {
+          errors.push(`compare ${path}: ${(e as Error).message}`);
+        }
+      }
+
       console.log('[HybridGitSync] Actions:', {
         push: actions.pushToRemote.length,
         pull: actions.pullFromRemote.length,

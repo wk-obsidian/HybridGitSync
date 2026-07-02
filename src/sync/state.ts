@@ -103,6 +103,7 @@ export class SyncStateManager {
       deleteFromRemote: [], // Deleted locally
       deleteFromLocal: [],  // Deleted remotely
       conflicts: [],        // Modified on both sides
+      needsContentComparison: [], // New on both sides - need to compare actual content
     };
 
     // Find all unique paths
@@ -124,10 +125,9 @@ export class SyncStateManager {
         } else if (!existsLocal && existsRemote) {
           actions.pullFromRemote.push(path);
         } else if (existsLocal && existsRemote) {
-          // New on both sides - conflict if different content
-          if (currentLocal.get(path) !== currentRemote.get(path)) {
-            actions.conflicts.push(path);
-          }
+          // New on both sides - need to compare actual content
+          // (hashes are in different formats, so we can't compare directly)
+          actions.needsContentComparison.push(path);
         }
       } else {
         // File existed at last sync
@@ -179,4 +179,5 @@ export interface SyncActions {
   deleteFromRemote: string[];
   deleteFromLocal: string[];
   conflicts: string[];
+  needsContentComparison: string[]; // Files that exist on both sides but are "new" - need content comparison
 }
