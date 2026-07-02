@@ -305,14 +305,35 @@ export class ApiBackend extends SyncBackend {
             const contentHash = await this.gitBlobSha1(localContent);
             this.stateManager.setFileState(path, contentHash);
             console.log('[HybridGitSync] Same content on both sides:', path);
-          } else if (isFirstSync) {
-            // First sync with no baseline - use remote as source of truth
-            console.log('[HybridGitSync] First sync, using remote version:', path);
-            actions.pullFromRemote.push(path);
           } else {
-            // Different content - conflict
-            actions.conflicts.push(path);
-            console.log('[HybridGitSync] Conflict (different content):', path);
+            // Different content - check who changed
+            const storedHash = this.stateManager.getFileState(path);
+            if (storedHash) {
+              const localHash = await this.gitBlobSha1(localContent);
+              const remoteHash = await this.gitBlobSha1(remoteFile.content);
+
+              if (storedHash === localHash) {
+                // Local unchanged, remote changed → pull
+                console.log('[HybridGitSync] Remote changed, pulling:', path);
+                actions.pullFromRemote.push(path);
+              } else if (storedHash === remoteHash) {
+                // Remote unchanged, local changed → push
+                console.log('[HybridGitSync] Local changed, pushing:', path);
+                actions.pushToRemote.push(path);
+              } else {
+                // Both changed → conflict
+                console.log('[HybridGitSync] Both changed, conflict:', path);
+                actions.conflicts.push(path);
+              }
+            } else if (isFirstSync) {
+              // First sync with no baseline - use remote as source of truth
+              console.log('[HybridGitSync] First sync, using remote version:', path);
+              actions.pullFromRemote.push(path);
+            } else {
+              // No stored hash, can't determine who changed → push local
+              console.log('[HybridGitSync] No baseline, pushing local:', path);
+              actions.pushToRemote.push(path);
+            }
           }
         } catch (e) {
           errors.push(`compare ${path}: ${(e as Error).message}`);
