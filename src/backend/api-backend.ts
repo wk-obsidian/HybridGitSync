@@ -791,7 +791,9 @@ export class ApiBackend extends SyncBackend {
     path: string,
     body?: any
   ): Promise<any> {
-    const url = `${this.baseUrl}${path}`;
+    // URL-encode the path to handle special characters (Chinese, spaces, etc.)
+    const encodedPath = path.split('/').map(segment => encodeURIComponent(segment)).join('/');
+    const url = `${this.baseUrl}${encodedPath}`;
     const headers: Record<string, string> = {
       'Authorization': `token ${this.config.token}`,
       'Content-Type': 'application/json',
