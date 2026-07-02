@@ -7,13 +7,13 @@ import { ConflictInfo, ConflictResolution, DiffResult, DiffLine } from '../sync/
 export class ConflictModal extends Modal {
   private conflict: ConflictInfo;
   private diff: DiffResult;
-  private onResolve: (resolution: ConflictResolution) => void;
+  private onResolve: (resolution: ConflictResolution) => Promise<void>;
 
   constructor(
     app: App,
     conflict: ConflictInfo,
     diff: DiffResult,
-    onResolve: (resolution: ConflictResolution) => void
+    onResolve: (resolution: ConflictResolution) => Promise<void>
   ) {
     super(app);
     this.conflict = conflict;
@@ -90,9 +90,17 @@ export class ConflictModal extends Modal {
     btn.style.color = color;
     btn.style.cursor = 'pointer';
 
-    btn.addEventListener('click', () => {
-      this.onResolve(resolution);
-      this.close();
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      btn.setText('Processing...');
+      try {
+        await this.onResolve(resolution);
+        this.close();
+      } catch (error) {
+        console.error('[ConflictModal] Resolution failed:', error);
+        btn.disabled = false;
+        btn.setText(text);
+      }
     });
   }
 
