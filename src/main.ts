@@ -147,7 +147,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private async loadGitignoreRules(): Promise<void> {
     try {
-      const content = await this.vault.adapter.read('.gitignore');
+      const content = await this.app.vault.adapter.read('.gitignore');
       this.gitignore.addRules(content);
       this.log('Loaded .gitignore rules');
     } catch {
@@ -159,6 +159,13 @@ export default class HybridGitSyncPlugin extends Plugin {
   // ===== Sync Operations =====
 
   async performSync(): Promise<void> {
+    this.log('performSync called', {
+      hasSettings: !!this.settings,
+      hasBackend: !!this.backend,
+      hasNetwork: !!this.network,
+      hasStatusBar: !!this.statusBar,
+    });
+
     if (!this.settings.remoteUrl) {
       this.showNotice('Please configure remote repository in settings.');
       return;
@@ -188,6 +195,10 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Use sync queue with debouncing
     const self = this;
     this.syncQueue.enqueue(async () => {
+      self.log('Sync queue callback executing', {
+        hasBackend: !!self.backend,
+        backendType: self.backend?.constructor?.name,
+      });
       self.statusBar.setState('syncing');
       self.log('Starting sync...');
 
@@ -234,10 +245,10 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Get local files
     const localFiles = new Map<string, string>();
     const listFiles = async (path: string) => {
-      const listing = await this.vault.adapter.list(path);
+      const listing = await this.app.vault.adapter.list(path);
       for (const file of listing.files) {
         if (!this.gitignore.shouldIgnore(file)) {
-          const content = await this.vault.adapter.read(file);
+          const content = await this.app.vault.adapter.read(file);
           localFiles.set(file, content);
         }
       }

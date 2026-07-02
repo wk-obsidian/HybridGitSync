@@ -31,6 +31,12 @@ export class ApiBackend extends SyncBackend {
     this.config = config;
     this.name = `api-${config.provider}`;
     this.baseUrl = config.baseUrl || this.getDefaultBaseUrl(config.provider);
+    console.log('[HybridGitSync] ApiBackend created', {
+      hasVault: !!vault,
+      hasAdapter: !!vault?.adapter,
+      repo: config.repo,
+      branch: config.branch,
+    });
   }
 
   async isAvailable(): Promise<boolean> {
