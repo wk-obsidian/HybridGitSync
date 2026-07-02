@@ -4,17 +4,29 @@ import { SyncBackend } from './backend/base';
 import { GitBackend } from './backend/git-backend';
 import { ApiBackend, ApiProvider } from './backend/api-backend';
 import { StatusBar } from './ui/status-bar';
+import { ConflictModal } from './ui/conflict-modal';
+import { ConflictResolver, ConflictInfo } from './sync/conflict';
+import { SyncQueue } from './sync/queue';
+import { NetworkStatus } from './utils/network';
+import { GitignoreRules } from './utils/gitignore';
 import { getPlatformType, getPlatformName, isDesktop } from './utils/platform';
 
 export default class HybridGitSyncPlugin extends Plugin {
   settings!: PluginSettings;
   backend!: SyncBackend;
   statusBar!: StatusBar;
+  syncQueue!: SyncQueue;
+  network!: NetworkStatus;
+  gitignore!: GitignoreRules;
   private autoSyncInterval: number | null = null;
-  private fileChangeTimeout: number | null = null;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    // Initialize utilities
+    this.syncQueue = new SyncQueue(this.settings.fileChangeDebounce * 1000);
+    this.network = new NetworkStatus();
+    this.gitignore = new GitignoreRules();
 
     // Initialize UI
     this.statusBar = new StatusBar(this.addStatusBarItem());
@@ -22,6 +34,9 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Initialize backend
     await this.initBackend();
+
+    // Load gitignore rules
+    await this.loadGitignoreRules();
 
     // Register commands
     this.registerCommands();
@@ -34,9 +49,18 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Setup auto sync
     this.setupAutoSync();
 
+    // Listen for network status changes
+    this.network.onChange(online => {
+      if (online) {
+        this.log('Network restored, triggering sync');
+        this.performSync();
+      } else {
+        this.statusBar.setState('offline');
+      }
+    });
+
     // Sync on startup
-    if (this.settings.syncOnStartup) {
-      // Delay a bit to let Obsidian finish loading
+    if (this.settings.syncOnStartup && this.network.isOnline()) {
       setTimeout(() => this.performSync(), 5000);
     }
 
@@ -45,6 +69,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   onunload(): void {
     this.stopAutoSync();
+    this.syncQueue.clear();
     this.backend?.dispose();
     this.log('Plugin unloaded');
   }
@@ -57,6 +82,8 @@ export default class HybridGitSyncPlugin extends Plugin {
     await this.saveData(this.settings);
     // Re-init backend when settings change
     await this.initBackend();
+    // Update sync queue debounce
+    this.syncQueue.setDebounceMs(this.settings.fileChangeDebounce * 1000);
   }
 
   // ===== Backend Management =====
@@ -74,7 +101,6 @@ export default class HybridGitSyncPlugin extends Plugin {
         this.showNotice('Git backend is not available on mobile. Using API backend.');
         this.backend = this.createApiBackend();
       } else {
-        // Convert "owner/repo" to full GitHub URL for git remote
         let remoteUrl = this.settings.remoteUrl;
         if (remoteUrl && !remoteUrl.startsWith('http') && !remoteUrl.startsWith('git@')) {
           remoteUrl = `https://github.com/${remoteUrl}.git`;
@@ -85,7 +111,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       this.backend = this.createApiBackend();
     }
 
-    // Check availability (don't show error on initial load, only on sync attempt)
+    // Check availability
     const available = await this.backend.isAvailable();
     if (!available) {
       this.statusBar.setState('idle', 'Not configured');
@@ -112,6 +138,19 @@ export default class HybridGitSyncPlugin extends Plugin {
     });
   }
 
+  // ===== Gitignore =====
+
+  private async loadGitignoreRules(): Promise<void> {
+    try {
+      const content = await this.vault.adapter.read('.gitignore');
+      this.gitignore.addRules(content);
+      this.log('Loaded .gitignore rules');
+    } catch {
+      // No .gitignore file, use built-in rules only
+      this.log('No .gitignore found, using built-in rules');
+    }
+  }
+
   // ===== Sync Operations =====
 
   async performSync(): Promise<void> {
@@ -120,35 +159,104 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
-    // Check backend availability before sync
-    const available = await this.backend.isAvailable();
-    if (!available) {
-      this.statusBar.setState('error', 'Backend not available');
-      this.showNotice(`${this.backend.name} backend is not available. Check settings or initialize git repo.`);
+    if (!this.network.isOnline()) {
+      this.statusBar.setState('offline');
+      this.showNotice('Offline. Sync will resume when network is available.');
       return;
     }
 
-    this.statusBar.setState('syncing');
-    this.log('Starting sync...');
+    // Check backend availability
+    const available = await this.backend.isAvailable();
+    if (!available) {
+      this.statusBar.setState('error', 'Backend not available');
+      this.showNotice(`${this.backend.name} backend is not available. Check settings.`);
+      return;
+    }
 
-    try {
-      const result = await this.backend.sync();
+    // Use sync queue with debouncing
+    this.syncQueue.enqueue(async () => {
+      this.statusBar.setState('syncing');
+      this.log('Starting sync...');
 
-      if (result.success) {
-        this.statusBar.setState('idle');
-        this.log('Sync completed', result.message);
-        if (this.settings.showNotice) {
-          this.showNotice('Sync completed');
+      try {
+        // If using API backend, check for conflicts first
+        if (this.backend instanceof ApiBackend) {
+          const conflicts = await this.checkConflicts();
+          if (conflicts.length > 0) {
+            this.statusBar.setState('conflict');
+            await this.handleConflicts(conflicts);
+            return;
+          }
         }
-      } else {
-        this.statusBar.setState('error', result.message);
-        this.showNotice(`Sync failed: ${result.message}`);
-        this.log('Sync failed', result.message);
+
+        const result = await this.backend.sync();
+
+        if (result.success) {
+          this.statusBar.setState('idle');
+          this.log('Sync completed', result.message);
+          if (this.settings.showNotice) {
+            this.showNotice(result.message || 'Sync completed');
+          }
+        } else {
+          this.statusBar.setState('error', result.message);
+          this.showNotice(`Sync failed: ${result.message}`);
+          this.log('Sync failed', result.message);
+        }
+      } catch (error) {
+        this.statusBar.setState('error', (error as Error).message);
+        this.showNotice(`Sync error: ${(error as Error).message}`);
+        this.log('Sync error', error);
       }
-    } catch (error) {
-      this.statusBar.setState('error', (error as Error).message);
-      this.showNotice(`Sync error: ${(error as Error).message}`);
-      this.log('Sync error', error);
+    });
+  }
+
+  /**
+   * Check for conflicts before syncing
+   */
+  private async checkConflicts(): Promise<ConflictInfo[]> {
+    if (!(this.backend instanceof ApiBackend)) return [];
+
+    const resolver = new ConflictResolver(this.vault, this.backend);
+
+    // Get local files
+    const localFiles = new Map<string, string>();
+    const listFiles = async (path: string) => {
+      const listing = await this.vault.adapter.list(path);
+      for (const file of listing.files) {
+        if (!this.gitignore.shouldIgnore(file)) {
+          const content = await this.vault.adapter.read(file);
+          localFiles.set(file, content);
+        }
+      }
+      for (const dir of listing.folders) {
+        if (!this.gitignore.shouldIgnore(dir)) {
+          await listFiles(dir);
+        }
+      }
+    };
+    await listFiles('');
+
+    return resolver.detectConflicts(localFiles);
+  }
+
+  /**
+   * Handle conflicts by showing the conflict resolution modal
+   */
+  private async handleConflicts(conflicts: ConflictInfo[]): Promise<void> {
+    const resolver = new ConflictResolver(this.vault, this.backend as ApiBackend);
+
+    for (const conflict of conflicts) {
+      const diff = resolver.generateDiff(conflict.localContent, conflict.remoteContent);
+
+      new ConflictModal(this.app, conflict, diff, async (resolution) => {
+        await resolver.resolve(conflict, resolution);
+        this.showNotice(`Resolved ${conflict.path}: ${resolution}`);
+
+        // Continue sync after all conflicts resolved
+        if (conflicts.indexOf(conflict) === conflicts.length - 1) {
+          await this.performSync();
+        }
+      }).open();
     }
   }
 
@@ -160,20 +268,41 @@ export default class HybridGitSyncPlugin extends Plugin {
     if (this.settings.autoSync) {
       const intervalMs = this.settings.autoSyncInterval * 60 * 1000;
       this.autoSyncInterval = window.setInterval(() => {
-        this.performSync();
+        if (this.network.isOnline()) {
+          this.performSync();
+        }
       }, intervalMs);
       this.registerInterval(this.autoSyncInterval);
     }
 
     if (this.settings.syncOnFileChange) {
       this.registerEvent(
-        this.app.vault.on('modify', () => this.onFileChange())
+        this.app.vault.on('modify', (file) => {
+          if (!this.gitignore.shouldIgnore(file.path)) {
+            this.onFileChange();
+          }
+        })
       );
       this.registerEvent(
-        this.app.vault.on('create', () => this.onFileChange())
+        this.app.vault.on('create', (file) => {
+          if (!this.gitignore.shouldIgnore(file.path)) {
+            this.onFileChange();
+          }
+        })
       );
       this.registerEvent(
-        this.app.vault.on('delete', () => this.onFileChange())
+        this.app.vault.on('delete', (file) => {
+          if (!this.gitignore.shouldIgnore(file.path)) {
+            this.onFileChange();
+          }
+        })
+      );
+      this.registerEvent(
+        this.app.vault.on('rename', (file) => {
+          if (!this.gitignore.shouldIgnore(file.path)) {
+            this.onFileChange();
+          }
+        })
       );
     }
   }
@@ -186,13 +315,8 @@ export default class HybridGitSyncPlugin extends Plugin {
   }
 
   private onFileChange(): void {
-    if (this.fileChangeTimeout !== null) {
-      window.clearTimeout(this.fileChangeTimeout);
-    }
-    this.fileChangeTimeout = window.setTimeout(() => {
-      this.performSync();
-      this.fileChangeTimeout = null;
-    }, this.settings.fileChangeDebounce * 1000);
+    if (!this.network.isOnline()) return;
+    this.syncQueue.enqueue(() => this.performSync());
   }
 
   // ===== Commands =====
@@ -208,6 +332,10 @@ export default class HybridGitSyncPlugin extends Plugin {
       id: 'pull',
       name: 'Pull',
       callback: async () => {
+        if (!this.network.isOnline()) {
+          this.showNotice('Offline');
+          return;
+        }
         this.statusBar.setState('syncing');
         const result = await this.backend.pull();
         if (result.success) {
@@ -224,6 +352,10 @@ export default class HybridGitSyncPlugin extends Plugin {
       id: 'push',
       name: 'Push',
       callback: async () => {
+        if (!this.network.isOnline()) {
+          this.showNotice('Offline');
+          return;
+        }
         this.statusBar.setState('syncing');
         const result = await this.backend.push();
         if (result.success) {
@@ -246,8 +378,19 @@ export default class HybridGitSyncPlugin extends Plugin {
           `Ahead: ${status.ahead}, Behind: ${status.behind}`,
           `Changed files: ${status.changedFiles.length}`,
           status.hasConflicts ? '⚠ Has conflicts' : 'No conflicts',
+          `Network: ${this.network.isOnline() ? 'Online' : 'Offline'}`,
         ].join('\n');
         this.showNotice(msg, 10000);
+      },
+    });
+
+    this.addCommand({
+      id: 'toggle-auto-sync',
+      name: 'Toggle auto sync',
+      callback: async () => {
+        this.settings.autoSync = !this.settings.autoSync;
+        await this.saveSettings();
+        this.showNotice(`Auto sync ${this.settings.autoSync ? 'enabled' : 'disabled'}`);
       },
     });
   }
