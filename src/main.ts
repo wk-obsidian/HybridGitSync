@@ -12,6 +12,8 @@ import { ConflictResolver, ConflictInfo } from './sync/conflict';
 import { SyncQueue } from './sync/queue';
 import { NetworkStatus } from './utils/network';
 import { GitignoreRules } from './utils/gitignore';
+import { Logger, LogLevel } from './utils/logger';
+import { SettingsIO } from './utils/settings-io';
 import { getPlatformType, getPlatformName, isDesktop } from './utils/platform';
 
 export default class HybridGitSyncPlugin extends Plugin {
@@ -21,6 +23,8 @@ export default class HybridGitSyncPlugin extends Plugin {
   syncQueue!: SyncQueue;
   network!: NetworkStatus;
   gitignore!: GitignoreRules;
+  logger!: Logger;
+  settingsIO!: SettingsIO;
   private autoSyncInterval: number | null = null;
   private isResolvingConflicts = false;
 
@@ -28,6 +32,8 @@ export default class HybridGitSyncPlugin extends Plugin {
     await this.loadSettings();
 
     // Initialize utilities
+    this.logger = new Logger('HybridGitSync', this.settings.debug ? LogLevel.DEBUG : LogLevel.INFO);
+    this.settingsIO = new SettingsIO(this.app.vault);
     this.syncQueue = new SyncQueue(this.settings.fileChangeDebounce * 1000);
     this.network = new NetworkStatus();
     this.gitignore = new GitignoreRules();
@@ -540,6 +546,67 @@ export default class HybridGitSyncPlugin extends Plugin {
       name: 'Switch branch',
       callback: () => this.switchBranch(),
     });
+
+    this.addCommand({
+      id: 'view-logs',
+      name: 'View logs',
+      callback: () => this.showLogs(),
+    });
+
+    this.addCommand({
+      id: 'export-settings',
+      name: 'Export settings',
+      callback: () => this.exportSettings(),
+    });
+
+    this.addCommand({
+      id: 'import-settings',
+      name: 'Import settings',
+      callback: () => this.importSettings(),
+    });
+
+    this.addCommand({
+      id: 'clear-sync-state',
+      name: 'Clear sync state',
+      callback: () => this.clearSyncState(),
+    });
+  }
+
+  // ===== Logs =====
+
+  private showLogs(): void {
+    const logs = this.logger.getLogsAsString();
+    const notice = new Notice('Logs copied to clipboard', 5000);
+    navigator.clipboard.writeText(logs);
+  }
+
+  // ===== Settings Import/Export =====
+
+  private async exportSettings(): Promise<void> {
+    await this.settingsIO.exportSettings(this.settings);
+    this.showNotice('Settings exported to .obsidian/plugins/hybrid-git-sync/settings-export.json');
+  }
+
+  private async importSettings(): Promise<void> {
+    const imported = await this.settingsIO.importSettings();
+    if (imported) {
+      this.settings = { ...this.settings, ...imported };
+      await this.saveSettings();
+      this.showNotice('Settings imported successfully');
+    } else {
+      this.showNotice('Failed to import settings');
+    }
+  }
+
+  // ===== Sync State =====
+
+  private async clearSyncState(): Promise<void> {
+    if (this.backend instanceof ApiBackend) {
+      const stateManager = (this.backend as ApiBackend).getStateManager();
+      stateManager.clear();
+      await stateManager.save();
+      this.showNotice('Sync state cleared');
+    }
   }
 
   // ===== Version Restore =====

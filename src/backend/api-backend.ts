@@ -363,51 +363,59 @@ export class ApiBackend extends SyncBackend {
         conflicts: actions.conflicts.length,
       });
 
-      // Step 9: Pull new/modified remote files
-      for (const path of actions.pullFromRemote) {
-        if (this.shouldIgnore(path)) continue;
-        try {
-          const remoteFile = await this.getFile(path);
-          if (!remoteFile) continue;
+      // Step 9: Pull new/modified remote files (parallel, max 3)
+      const pullPromises = actions.pullFromRemote
+        .filter(path => !this.shouldIgnore(path))
+        .map(async (path) => {
+          try {
+            const remoteFile = await this.getFile(path);
+            if (!remoteFile) return;
 
-          const dir = path.substring(0, path.lastIndexOf('/'));
-          if (dir) {
-            try { await this.vault.adapter.mkdir(dir); } catch {}
+            const dir = path.substring(0, path.lastIndexOf('/'));
+            if (dir) {
+              try { await this.vault.adapter.mkdir(dir); } catch {}
+            }
+            await this.vault.adapter.write(path, remoteFile.content);
+            // Store content hash (SHA-1)
+            const contentHash = await this.gitBlobSha1(remoteFile.content);
+            this.stateManager.setFileState(path, contentHash);
+            // Update cached remote SHA
+            const remoteSha = remoteMap.get(path);
+            if (remoteSha) {
+              this.stateManager.setRemoteSha(path, remoteSha);
+            }
+            pulled++;
+            console.log('[HybridGitSync] Downloaded:', path);
+          } catch (e) {
+            errors.push(`pull ${path}: ${(e as Error).message}`);
           }
-          await this.vault.adapter.write(path, remoteFile.content);
-          // Store content hash (SHA-1)
-          const contentHash = await this.gitBlobSha1(remoteFile.content);
-          this.stateManager.setFileState(path, contentHash);
-          // Update cached remote SHA
-          const remoteSha = remoteMap.get(path);
-          if (remoteSha) {
-            this.stateManager.setRemoteSha(path, remoteSha);
-          }
-          pulled++;
-          console.log('[HybridGitSync] Downloaded:', path);
-        } catch (e) {
-          errors.push(`pull ${path}: ${(e as Error).message}`);
-        }
-      }
+        });
 
-      // Step 10: Push new/modified local files
-      for (const path of actions.pushToRemote) {
-        if (this.shouldIgnore(path)) continue;
-        try {
-          const content = await this.vault.adapter.read(path);
-          const sha = remoteMap.get(path);
-          const newSha = await this.putFile(path, content, sha);
-          // Store content hash (SHA-1)
-          const contentHash = await this.gitBlobSha1(content);
-          this.stateManager.setFileState(path, contentHash);
-          // Update cached remote SHA
-          this.stateManager.setRemoteSha(path, newSha);
-          pushed++;
-          console.log('[HybridGitSync] Uploaded:', path);
-        } catch (e) {
-          errors.push(`push ${path}: ${(e as Error).message}`);
-        }
-      }
+      // Execute in parallel with concurrency limit
+      await this.parallelLimit(pullPromises, 3);
+
+      // Step 10: Push new/modified local files (parallel, max 3)
+      const pushPromises = actions.pushToRemote
+        .filter(path => !this.shouldIgnore(path))
+        .map(async (path) => {
+          try {
+            const content = await this.vault.adapter.read(path);
+            const sha = remoteMap.get(path);
+            const newSha = await this.putFile(path, content, sha);
+            // Store content hash (SHA-1)
+            const contentHash = await this.gitBlobSha1(content);
+            this.stateManager.setFileState(path, contentHash);
+            // Update cached remote SHA
+            this.stateManager.setRemoteSha(path, newSha);
+            pushed++;
+            console.log('[HybridGitSync] Uploaded:', path);
+          } catch (e) {
+            errors.push(`push ${path}: ${(e as Error).message}`);
+          }
+        });
+
+      // Execute in parallel with concurrency limit
+      await this.parallelLimit(pushPromises, 3);
 
       // Step 11: Delete files that were deleted locally
       for (const path of actions.deleteFromRemote) {
@@ -774,6 +782,46 @@ export class ApiBackend extends SyncBackend {
   }
 
   // ===== Private helpers =====
+
+  /**
+   * Execute promises in parallel with concurrency limit
+   */
+  private async parallelLimit(promises: Promise<void>[], limit: number): Promise<void> {
+    const results: Promise<void>[] = [];
+    const executing: Set<Promise<void>> = new Set();
+
+    for (const promise of promises) {
+      const p = promise.then(() => {
+        executing.delete(p);
+      });
+      executing.add(p);
+      results.push(p);
+
+      if (executing.size >= limit) {
+        await Promise.race(executing);
+      }
+    }
+
+    await Promise.all(results);
+  }
+
+  /**
+   * Check if file is too large for API (GitHub limit: 100MB)
+   */
+  private isFileTooLarge(content: string): boolean {
+    const sizeInBytes = new TextEncoder().encode(content).length;
+    const maxSize = 100 * 1024 * 1024; // 100MB
+    return sizeInBytes > maxSize;
+  }
+
+  /**
+   * Get file size in human readable format
+   */
+  private formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   /**
    * Generate Git-compatible blob SHA-1
