@@ -93,21 +93,34 @@ export class ConflictResolver {
 
     try {
       switch (resolution) {
-        case 'local':
-          // Keep local version, push to remote
-          console.log('[ConflictResolver] Getting remote file SHA...');
-          const remoteFile = await this.backend.getFile(conflict.path);
-          const currentSha = remoteFile?.sha;
-          console.log('[ConflictResolver] Current remote SHA:', currentSha);
-          console.log('[ConflictResolver] Pushing local content to remote...');
-          const newSha = await this.backend.putFile(conflict.path, conflict.localContent, currentSha);
-          console.log('[ConflictResolver] Pushed, new SHA:', newSha);
-          // Update sync state with local content hash
-          const localHash = await this.gitBlobSha1(conflict.localContent);
-          this.stateManager.setFileState(conflict.path, localHash);
-          // Update cached remote SHA
-          this.stateManager.setRemoteSha(conflict.path, newSha);
+        case 'local': {
+          // Keep local version, push to remote (with retry)
+          let retries = 3;
+          let success = false;
+          while (retries > 0 && !success) {
+            console.log('[ConflictResolver] Getting remote file SHA... (retries:', retries, ')');
+            const remoteFile = await this.backend.getFile(conflict.path);
+            const currentSha = remoteFile?.sha;
+            console.log('[ConflictResolver] Current remote SHA:', currentSha);
+            console.log('[ConflictResolver] Pushing local content to remote...');
+            try {
+              const newSha = await this.backend.putFile(conflict.path, conflict.localContent, currentSha);
+              console.log('[ConflictResolver] Pushed, new SHA:', newSha);
+              // Update sync state with local content hash
+              const localHash = await this.gitBlobSha1(conflict.localContent);
+              this.stateManager.setFileState(conflict.path, localHash);
+              // Update cached remote SHA
+              this.stateManager.setRemoteSha(conflict.path, newSha);
+              success = true;
+            } catch (e) {
+              retries--;
+              if (retries === 0) throw e;
+              console.warn('[ConflictResolver] Retry due to conflict...');
+              await new Promise(r => setTimeout(r, 1000)); // Wait 1 second
+            }
+          }
           break;
+        }
 
         case 'remote':
           // Keep remote version, write to local
