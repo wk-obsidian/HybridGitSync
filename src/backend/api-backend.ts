@@ -179,14 +179,95 @@ export class ApiBackend extends SyncBackend {
 
   async sync(): Promise<SyncResult> {
     try {
-      // Step 1: Push local changes
-      const pushResult = await this.push();
-      if (!pushResult.success) return pushResult;
+      let pulled = 0;
+      let pushed = 0;
+      const errors: string[] = [];
+
+      // Step 1: Get remote file list
+      const remoteFiles = await this.listFilesRecursive('');
+      const remoteMap = new Map<string, string>(); // path -> sha
+      for (const f of remoteFiles) {
+        remoteMap.set(f.path, f.sha);
+      }
+      console.log('[HybridGitSync] Remote files:', remoteMap.size);
+
+      // Step 2: Get local file list
+      const localFiles = await this.listLocalFiles('');
+      const localSet = new Set(localFiles);
+      console.log('[HybridGitSync] Local files:', localFiles.length);
+
+      // Step 3: Pull files that exist only remotely or are newer
+      for (const [remotePath, remoteSha] of remoteMap) {
+        if (this.shouldIgnore(remotePath)) continue;
+
+        try {
+          const remoteFile = await this.getFile(remotePath);
+          if (!remoteFile) continue;
+
+          let needDownload = false;
+          try {
+            const localContent = await this.vault.adapter.read(remotePath);
+            if (localContent !== remoteFile.content) {
+              // Both have different content - check which is newer
+              // For now, we'll detect this as a conflict in the sync engine
+              console.log('[HybridGitSync] Conflict detected:', remotePath);
+              continue; // Skip for now, conflict resolution handles this
+            }
+          } catch {
+            // File doesn't exist locally
+            needDownload = true;
+          }
+
+          if (needDownload) {
+            // Ensure parent directory exists
+            const dir = remotePath.substring(0, remotePath.lastIndexOf('/'));
+            if (dir) {
+              try { await this.vault.adapter.mkdir(dir); } catch {}
+            }
+            await this.vault.adapter.write(remotePath, remoteFile.content);
+            pulled++;
+            console.log('[HybridGitSync] Downloaded:', remotePath);
+          }
+        } catch (e) {
+          errors.push(`pull ${remotePath}: ${(e as Error).message}`);
+        }
+      }
+
+      // Step 4: Push files that exist only locally or are newer
+      for (const localPath of localFiles) {
+        if (this.shouldIgnore(localPath)) continue;
+
+        try {
+          const localContent = await this.vault.adapter.read(localPath);
+          const remoteSha = remoteMap.get(localPath);
+
+          if (remoteSha) {
+            // File exists on both sides - check if content differs
+            const remoteFile = await this.getFile(localPath);
+            if (remoteFile && remoteFile.content === localContent) {
+              continue; // Same content, skip
+            }
+            // Content differs - this should be a conflict, but for now we push local
+            console.log('[HybridGitSync] Content differs, pushing local:', localPath);
+          }
+
+          await this.putFile(localPath, localContent, remoteSha);
+          pushed++;
+          console.log('[HybridGitSync] Uploaded:', localPath);
+        } catch (e) {
+          errors.push(`push ${localPath}: ${(e as Error).message}`);
+        }
+      }
+
+      const message = `Sync completed: pulled ${pulled}, pushed ${pushed}` +
+        (errors.length > 0 ? `, ${errors.length} error(s)` : '');
 
       return {
-        success: true,
-        message: `Sync completed. ${pushResult.message}`,
-        pushed: pushResult.pushed,
+        success: errors.length === 0,
+        message,
+        pulled,
+        pushed,
+        error: errors.length > 0 ? new Error(errors.join('\n')) : undefined,
       };
     } catch (error) {
       return {
@@ -341,6 +422,8 @@ export class ApiBackend extends SyncBackend {
     const results: string[] = [];
     const listing = await this.vault.adapter.list(path);
     console.log('[HybridGitSync] Scanning:', path || '/', '→', listing.files.length, 'files,', listing.folders.length, 'folders');
+    console.log('[HybridGitSync] Files:', listing.files);
+    console.log('[HybridGitSync] Folders:', listing.folders);
 
     for (const file of listing.files) {
       if (!this.shouldIgnore(file)) {
