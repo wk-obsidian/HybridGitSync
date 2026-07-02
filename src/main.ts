@@ -140,7 +140,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       repo: this.settings.remoteUrl,
       branch: this.settings.branch,
       baseUrl: this.settings.apiBaseUrl || undefined,
-    });
+    }, this.gitignore);
   }
 
   // ===== Gitignore =====

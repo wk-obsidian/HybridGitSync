@@ -1,6 +1,7 @@
 import { requestUrl, RequestUrlResponse, Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 import { SyncStateManager } from '../sync/state';
+import { GitignoreRules } from '../utils/gitignore';
 
 export type ApiProvider = 'github' | 'gitlab' | 'gitea';
 
@@ -26,14 +27,16 @@ export class ApiBackend extends SyncBackend {
   private baseUrl: string;
   private vault: Vault;
   private stateManager: SyncStateManager;
+  private gitignore: GitignoreRules;
 
-  constructor(vault: Vault, config: ApiConfig) {
+  constructor(vault: Vault, config: ApiConfig, gitignore?: GitignoreRules) {
     super();
     this.vault = vault;
     this.config = config;
     this.name = `api-${config.provider}`;
     this.baseUrl = config.baseUrl || this.getDefaultBaseUrl(config.provider);
     this.stateManager = new SyncStateManager(vault);
+    this.gitignore = gitignore || new GitignoreRules();
     console.log('[HybridGitSync] ApiBackend created', {
       hasVault: !!vault,
       hasAdapter: !!vault?.adapter,
@@ -505,14 +508,7 @@ export class ApiBackend extends SyncBackend {
   }
 
   private shouldIgnore(path: string): boolean {
-    const ignorePatterns = [
-      '.obsidian/',
-      '.trash/',
-      '.git/',
-      '.DS_Store',
-      'Thumbs.db',
-    ];
-    return ignorePatterns.some(p => path.includes(p));
+    return this.gitignore.shouldIgnore(path);
   }
 
   private getDefaultBaseUrl(provider: ApiProvider): string {
