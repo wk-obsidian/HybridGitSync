@@ -33,7 +33,12 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.addSettingTab(new SettingsTab(this.app, this));
 
     // Initialize backend
-    await this.initBackend();
+    try {
+      await this.initBackend();
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to initialize backend:', error);
+      this.showNotice('Failed to initialize sync backend. Check settings.');
+    }
 
     // Load gitignore rules
     await this.loadGitignoreRules();
@@ -165,6 +170,13 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
+    // Check if backend is initialized
+    if (!this.backend) {
+      this.statusBar.setState('error', 'Backend not initialized');
+      this.showNotice('Backend not initialized. Please check settings.');
+      return;
+    }
+
     // Check backend availability
     const available = await this.backend.isAvailable();
     if (!available) {
@@ -174,38 +186,39 @@ export default class HybridGitSyncPlugin extends Plugin {
     }
 
     // Use sync queue with debouncing
+    const self = this;
     this.syncQueue.enqueue(async () => {
-      this.statusBar.setState('syncing');
-      this.log('Starting sync...');
+      self.statusBar.setState('syncing');
+      self.log('Starting sync...');
 
       try {
         // If using API backend, check for conflicts first
-        if (this.backend instanceof ApiBackend) {
-          const conflicts = await this.checkConflicts();
+        if (self.backend instanceof ApiBackend) {
+          const conflicts = await self.checkConflicts();
           if (conflicts.length > 0) {
-            this.statusBar.setState('conflict');
-            await this.handleConflicts(conflicts);
+            self.statusBar.setState('conflict');
+            await self.handleConflicts(conflicts);
             return;
           }
         }
 
-        const result = await this.backend.sync();
+        const result = await self.backend.sync();
 
         if (result.success) {
-          this.statusBar.setState('idle');
-          this.log('Sync completed', result.message);
-          if (this.settings.showNotice) {
-            this.showNotice(result.message || 'Sync completed');
+          self.statusBar.setState('idle');
+          self.log('Sync completed', result.message);
+          if (self.settings.showNotice) {
+            self.showNotice(result.message || 'Sync completed');
           }
         } else {
-          this.statusBar.setState('error', result.message);
-          this.showNotice(`Sync failed: ${result.message}`);
-          this.log('Sync failed', result.message);
+          self.statusBar.setState('error', result.message);
+          self.showNotice(`Sync failed: ${result.message}`);
+          self.log('Sync failed', result.message);
         }
       } catch (error) {
-        this.statusBar.setState('error', (error as Error).message);
-        this.showNotice(`Sync error: ${(error as Error).message}`);
-        this.log('Sync error', error);
+        self.statusBar.setState('error', (error as Error).message);
+        self.showNotice(`Sync error: ${(error as Error).message}`);
+        self.log('Sync error', error);
       }
     });
   }
