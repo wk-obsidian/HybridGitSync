@@ -1,5 +1,6 @@
 import { requestUrl, RequestUrlResponse, Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
+import { SyncStateManager } from '../sync/state';
 
 export type ApiProvider = 'github' | 'gitlab' | 'gitea';
 
@@ -24,6 +25,7 @@ export class ApiBackend extends SyncBackend {
   private config: ApiConfig;
   private baseUrl: string;
   private vault: Vault;
+  private stateManager: SyncStateManager;
 
   constructor(vault: Vault, config: ApiConfig) {
     super();
@@ -31,6 +33,7 @@ export class ApiBackend extends SyncBackend {
     this.config = config;
     this.name = `api-${config.provider}`;
     this.baseUrl = config.baseUrl || this.getDefaultBaseUrl(config.provider);
+    this.stateManager = new SyncStateManager(vault);
     console.log('[HybridGitSync] ApiBackend created', {
       hasVault: !!vault,
       hasAdapter: !!vault?.adapter,
@@ -181,9 +184,14 @@ export class ApiBackend extends SyncBackend {
     try {
       let pulled = 0;
       let pushed = 0;
+      let deleted = 0;
       const errors: string[] = [];
 
-      // Step 1: Get remote file list
+      // Step 1: Load sync state
+      await this.stateManager.load();
+      console.log('[HybridGitSync] Last sync:', this.stateManager.getLastSyncTime());
+
+      // Step 2: Get current remote file list
       const remoteFiles = await this.listFilesRecursive('');
       const remoteMap = new Map<string, string>(); // path -> sha
       for (const f of remoteFiles) {
@@ -191,82 +199,104 @@ export class ApiBackend extends SyncBackend {
       }
       console.log('[HybridGitSync] Remote files:', remoteMap.size);
 
-      // Step 2: Get local file list
+      // Step 3: Get current local file list with content hash
       const localFiles = await this.listLocalFiles('');
-      const localSet = new Set(localFiles);
-      console.log('[HybridGitSync] Local files:', localFiles.length);
-
-      // Step 3: Pull files that exist only remotely or are newer
-      for (const [remotePath, remoteSha] of remoteMap) {
-        if (this.shouldIgnore(remotePath)) continue;
-
+      const localMap = new Map<string, string>(); // path -> content hash
+      for (const path of localFiles) {
         try {
-          const remoteFile = await this.getFile(remotePath);
+          const content = await this.vault.adapter.read(path);
+          localMap.set(path, await this.sha1(content));
+        } catch {}
+      }
+      console.log('[HybridGitSync] Local files:', localMap.size);
+
+      // Step 4: Detect changes
+      const actions = this.stateManager.detectChanges(localMap, remoteMap);
+      console.log('[HybridGitSync] Actions:', {
+        push: actions.pushToRemote.length,
+        pull: actions.pullFromRemote.length,
+        deleteRemote: actions.deleteFromRemote.length,
+        deleteLocal: actions.deleteFromLocal.length,
+        conflicts: actions.conflicts.length,
+      });
+
+      // Step 5: Pull new/modified remote files
+      for (const path of actions.pullFromRemote) {
+        if (this.shouldIgnore(path)) continue;
+        try {
+          const remoteFile = await this.getFile(path);
           if (!remoteFile) continue;
 
-          let needDownload = false;
-          try {
-            const localContent = await this.vault.adapter.read(remotePath);
-            if (localContent !== remoteFile.content) {
-              // Both have different content - check which is newer
-              // For now, we'll detect this as a conflict in the sync engine
-              console.log('[HybridGitSync] Conflict detected:', remotePath);
-              continue; // Skip for now, conflict resolution handles this
-            }
-          } catch {
-            // File doesn't exist locally
-            needDownload = true;
+          const dir = path.substring(0, path.lastIndexOf('/'));
+          if (dir) {
+            try { await this.vault.adapter.mkdir(dir); } catch {}
           }
-
-          if (needDownload) {
-            // Ensure parent directory exists
-            const dir = remotePath.substring(0, remotePath.lastIndexOf('/'));
-            if (dir) {
-              try { await this.vault.adapter.mkdir(dir); } catch {}
-            }
-            await this.vault.adapter.write(remotePath, remoteFile.content);
-            pulled++;
-            console.log('[HybridGitSync] Downloaded:', remotePath);
-          }
+          await this.vault.adapter.write(path, remoteFile.content);
+          this.stateManager.setFileState(path, remoteMap.get(path)!);
+          pulled++;
+          console.log('[HybridGitSync] Downloaded:', path);
         } catch (e) {
-          errors.push(`pull ${remotePath}: ${(e as Error).message}`);
+          errors.push(`pull ${path}: ${(e as Error).message}`);
         }
       }
 
-      // Step 4: Push files that exist only locally or are newer
-      for (const localPath of localFiles) {
-        if (this.shouldIgnore(localPath)) continue;
-
+      // Step 6: Push new/modified local files
+      for (const path of actions.pushToRemote) {
+        if (this.shouldIgnore(path)) continue;
         try {
-          const localContent = await this.vault.adapter.read(localPath);
-          const remoteSha = remoteMap.get(localPath);
-
-          if (remoteSha) {
-            // File exists on both sides - check if content differs
-            const remoteFile = await this.getFile(localPath);
-            if (remoteFile && remoteFile.content === localContent) {
-              continue; // Same content, skip
-            }
-            // Content differs - this should be a conflict, but for now we push local
-            console.log('[HybridGitSync] Content differs, pushing local:', localPath);
-          }
-
-          await this.putFile(localPath, localContent, remoteSha);
+          const content = await this.vault.adapter.read(path);
+          const sha = remoteMap.get(path);
+          const newSha = await this.putFile(path, content, sha);
+          this.stateManager.setFileState(path, newSha);
           pushed++;
-          console.log('[HybridGitSync] Uploaded:', localPath);
+          console.log('[HybridGitSync] Uploaded:', path);
         } catch (e) {
-          errors.push(`push ${localPath}: ${(e as Error).message}`);
+          errors.push(`push ${path}: ${(e as Error).message}`);
         }
       }
 
-      const message = `Sync completed: pulled ${pulled}, pushed ${pushed}` +
+      // Step 7: Delete files that were deleted locally
+      for (const path of actions.deleteFromRemote) {
+        if (this.shouldIgnore(path)) continue;
+        try {
+          const sha = remoteMap.get(path);
+          if (sha) {
+            await this.deleteFile(path, sha);
+            this.stateManager.removeFileState(path);
+            deleted++;
+            console.log('[HybridGitSync] Deleted from remote:', path);
+          }
+        } catch (e) {
+          errors.push(`delete remote ${path}: ${(e as Error).message}`);
+        }
+      }
+
+      // Step 8: Delete files that were deleted remotely
+      for (const path of actions.deleteFromLocal) {
+        if (this.shouldIgnore(path)) continue;
+        try {
+          await this.vault.adapter.remove(path);
+          this.stateManager.removeFileState(path);
+          deleted++;
+          console.log('[HybridGitSync] Deleted locally:', path);
+        } catch (e) {
+          errors.push(`delete local ${path}: ${(e as Error).message}`);
+        }
+      }
+
+      // Step 9: Save sync state
+      await this.stateManager.save();
+
+      const message = `Sync completed: pulled ${pulled}, pushed ${pushed}, deleted ${deleted}` +
+        (actions.conflicts.length > 0 ? `, ${actions.conflicts.length} conflict(s)` : '') +
         (errors.length > 0 ? `, ${errors.length} error(s)` : '');
 
       return {
-        success: errors.length === 0,
+        success: errors.length === 0 && actions.conflicts.length === 0,
         message,
         pulled,
         pushed,
+        conflicts: actions.conflicts,
         error: errors.length > 0 ? new Error(errors.join('\n')) : undefined,
       };
     } catch (error) {
@@ -417,6 +447,16 @@ export class ApiBackend extends SyncBackend {
   }
 
   // ===== Private helpers =====
+
+  /**
+   * Generate SHA-1 hash of content (for change detection)
+   */
+  private async sha1(content: string): Promise<string> {
+    const msgBuffer = new TextEncoder().encode(content);
+    const hashBuffer = await crypto.subtle.digest('SHA-1', msgBuffer);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
 
   private async listLocalFiles(path: string): Promise<string[]> {
     const results: string[] = [];
