@@ -826,11 +826,12 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
-   * Check if file is too large for API (GitHub limit: 100MB)
+   * Check if file is too large for API
+   * GitHub API limit is around 50MB for content API
    */
   private isFileTooLarge(content: string): boolean {
     const sizeInBytes = new TextEncoder().encode(content).length;
-    const maxSize = 100 * 1024 * 1024; // 100MB
+    const maxSize = 50 * 1024 * 1024; // 50MB (GitHub API actual limit)
     return sizeInBytes > maxSize;
   }
 
