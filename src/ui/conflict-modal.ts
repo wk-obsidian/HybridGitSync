@@ -100,6 +100,14 @@ export class ConflictModal extends Modal {
         console.error('[ConflictModal] Resolution failed:', error);
         btn.disabled = false;
         btn.setText(text);
+        // Show error message in the modal
+        const errorEl = this.contentEl.createDiv('conflict-error');
+        errorEl.style.color = 'var(--text-error)';
+        errorEl.style.marginTop = '8px';
+        errorEl.style.fontSize = '12px';
+        errorEl.setText(`Error: ${(error as Error).message}`);
+        // Auto-remove after 5 seconds
+        setTimeout(() => errorEl.remove(), 5000);
       }
     });
   }

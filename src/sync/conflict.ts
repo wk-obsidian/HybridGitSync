@@ -89,52 +89,70 @@ export class ConflictResolver {
    * Resolve a conflict with the given strategy
    */
   async resolve(conflict: ConflictInfo, resolution: ConflictResolution): Promise<void> {
-    switch (resolution) {
-      case 'local':
-        // Keep local version, push to remote
-        const newSha = await this.backend.putFile(conflict.path, conflict.localContent);
-        // Update sync state with local content hash
-        const localHash = await this.gitBlobSha1(conflict.localContent);
-        this.stateManager.setFileState(conflict.path, localHash);
-        // Update cached remote SHA
-        this.stateManager.setRemoteSha(conflict.path, newSha);
-        break;
+    console.log('[ConflictResolver] Resolving:', conflict.path, 'with strategy:', resolution);
 
-      case 'remote':
-        // Keep remote version, write to local
-        await this.vault.adapter.write(conflict.path, conflict.remoteContent);
-        // Update sync state with remote content hash
-        const remoteHash = await this.gitBlobSha1(conflict.remoteContent);
-        this.stateManager.setFileState(conflict.path, remoteHash);
-        // Remote SHA stays the same (we're using remote's version)
-        break;
+    try {
+      switch (resolution) {
+        case 'local':
+          // Keep local version, push to remote
+          console.log('[ConflictResolver] Getting remote file SHA...');
+          const remoteFile = await this.backend.getFile(conflict.path);
+          const currentSha = remoteFile?.sha;
+          console.log('[ConflictResolver] Current remote SHA:', currentSha);
+          console.log('[ConflictResolver] Pushing local content to remote...');
+          const newSha = await this.backend.putFile(conflict.path, conflict.localContent, currentSha);
+          console.log('[ConflictResolver] Pushed, new SHA:', newSha);
+          // Update sync state with local content hash
+          const localHash = await this.gitBlobSha1(conflict.localContent);
+          this.stateManager.setFileState(conflict.path, localHash);
+          // Update cached remote SHA
+          this.stateManager.setRemoteSha(conflict.path, newSha);
+          break;
 
-      case 'both':
-        // Save both versions
-        const ext = conflict.path.lastIndexOf('.');
-        const baseName = ext > -1 ? conflict.path.substring(0, ext) : conflict.path;
-        const extension = ext > -1 ? conflict.path.substring(ext) : '';
+        case 'remote':
+          // Keep remote version, write to local
+          console.log('[ConflictResolver] Writing remote content to local...');
+          await this.vault.adapter.write(conflict.path, conflict.remoteContent);
+          // Update sync state with remote content hash
+          const remoteHash = await this.gitBlobSha1(conflict.remoteContent);
+          this.stateManager.setFileState(conflict.path, remoteHash);
+          // Remote SHA stays the same (we're using remote's version)
+          break;
 
-        const localPath = `${baseName}.local${extension}`;
-        const remotePath = `${baseName}.remote${extension}`;
+        case 'both':
+          // Save both versions
+          const ext = conflict.path.lastIndexOf('.');
+          const baseName = ext > -1 ? conflict.path.substring(0, ext) : conflict.path;
+          const extension = ext > -1 ? conflict.path.substring(ext) : '';
 
-        await this.vault.adapter.write(localPath, conflict.localContent);
-        await this.vault.adapter.write(remotePath, conflict.remoteContent);
-        // Update sync state for both files
-        this.stateManager.setFileState(localPath, await this.gitBlobSha1(conflict.localContent));
-        this.stateManager.setFileState(remotePath, await this.gitBlobSha1(conflict.remoteContent));
-        // Remove original path from state
-        this.stateManager.removeFileState(conflict.path);
-        this.stateManager.removeRemoteSha(conflict.path);
-        break;
+          const localPath = `${baseName}.local${extension}`;
+          const remotePath = `${baseName}.remote${extension}`;
 
-      case 'skip':
-        // Do nothing - keep the conflict for next sync
-        break;
+          console.log('[ConflictResolver] Saving both versions:', localPath, remotePath);
+          await this.vault.adapter.write(localPath, conflict.localContent);
+          await this.vault.adapter.write(remotePath, conflict.remoteContent);
+          // Update sync state for both files
+          this.stateManager.setFileState(localPath, await this.gitBlobSha1(conflict.localContent));
+          this.stateManager.setFileState(remotePath, await this.gitBlobSha1(conflict.remoteContent));
+          // Remove original path from state
+          this.stateManager.removeFileState(conflict.path);
+          this.stateManager.removeRemoteSha(conflict.path);
+          break;
+
+        case 'skip':
+          console.log('[ConflictResolver] Skipping conflict');
+          // Do nothing - keep the conflict for next sync
+          break;
+      }
+
+      // Save state after resolution
+      console.log('[ConflictResolver] Saving state...');
+      await this.stateManager.save();
+      console.log('[ConflictResolver] Resolution complete');
+    } catch (error) {
+      console.error('[ConflictResolver] Error resolving conflict:', error);
+      throw error; // Re-throw to let the modal handle it
     }
-
-    // Save state after resolution
-    await this.stateManager.save();
   }
 
   /**
