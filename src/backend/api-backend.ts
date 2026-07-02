@@ -35,7 +35,12 @@ export class ApiBackend extends SyncBackend {
 
   async isAvailable(): Promise<boolean> {
     try {
-      await this.apiRequest('GET', `/repos/${this.config.repo}`);
+      const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`);
+      // Auto-detect default branch if not specified or invalid
+      if (repoInfo.default_branch && this.config.branch !== repoInfo.default_branch) {
+        console.log(`[HybridGitSync] Auto-correcting branch: ${this.config.branch} → ${repoInfo.default_branch}`);
+        this.config.branch = repoInfo.default_branch;
+      }
       return true;
     } catch {
       return false;
@@ -99,6 +104,8 @@ export class ApiBackend extends SyncBackend {
 
       // Get local file list
       const localFiles = await this.listLocalFiles('');
+      console.log('[HybridGitSync] Local files:', localFiles);
+      console.log('[HybridGitSync] Remote files:', remoteMap.size);
       let pushed = 0;
       const errors: string[] = [];
 
@@ -119,11 +126,14 @@ export class ApiBackend extends SyncBackend {
             }
           }
 
+          console.log('[HybridGitSync] Uploading:', localPath);
           await this.putFile(localPath, localContent, remoteSha);
           pushed++;
           remoteMap.delete(localPath); // Mark as processed
         } catch (e) {
-          errors.push(`${localPath}: ${(e as Error).message}`);
+          const errMsg = `${localPath}: ${(e as Error).message}`;
+          console.error('[HybridGitSync] Error:', errMsg);
+          errors.push(errMsg);
         }
       }
 
@@ -237,6 +247,11 @@ export class ApiBackend extends SyncBackend {
     // Nothing to dispose
   }
 
+  /** Get the current branch (may be auto-corrected) */
+  getBranch(): string {
+    return this.config.branch;
+  }
+
   // ===== File operations =====
 
   async getFile(path: string): Promise<{ content: string; sha: string } | null> {
@@ -319,6 +334,7 @@ export class ApiBackend extends SyncBackend {
   private async listLocalFiles(path: string): Promise<string[]> {
     const results: string[] = [];
     const listing = await this.vault.adapter.list(path);
+    console.log('[HybridGitSync] Scanning:', path || '/', '→', listing.files.length, 'files,', listing.folders.length, 'folders');
 
     for (const file of listing.files) {
       if (!this.shouldIgnore(file)) {

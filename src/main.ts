@@ -91,6 +91,15 @@ export default class HybridGitSyncPlugin extends Plugin {
       this.statusBar.setState('idle', 'Not configured');
       this.log('Backend not available, will check again on sync');
     }
+
+    // Save corrected branch if using API backend
+    if ('getBranch' in this.backend) {
+      const correctedBranch = (this.backend as any).getBranch();
+      if (correctedBranch !== this.settings.branch) {
+        this.settings.branch = correctedBranch;
+        await this.saveSettings();
+      }
+    }
   }
 
   private createApiBackend(): ApiBackend {
