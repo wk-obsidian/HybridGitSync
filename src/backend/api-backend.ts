@@ -378,6 +378,11 @@ export class ApiBackend extends SyncBackend {
           // Store content hash (SHA-1)
           const contentHash = await this.gitBlobSha1(remoteFile.content);
           this.stateManager.setFileState(path, contentHash);
+          // Update cached remote SHA
+          const remoteSha = remoteMap.get(path);
+          if (remoteSha) {
+            this.stateManager.setRemoteSha(path, remoteSha);
+          }
           pulled++;
           console.log('[HybridGitSync] Downloaded:', path);
         } catch (e) {
@@ -391,10 +396,12 @@ export class ApiBackend extends SyncBackend {
         try {
           const content = await this.vault.adapter.read(path);
           const sha = remoteMap.get(path);
-          await this.putFile(path, content, sha);
+          const newSha = await this.putFile(path, content, sha);
           // Store content hash (SHA-1)
           const contentHash = await this.gitBlobSha1(content);
           this.stateManager.setFileState(path, contentHash);
+          // Update cached remote SHA
+          this.stateManager.setRemoteSha(path, newSha);
           pushed++;
           console.log('[HybridGitSync] Uploaded:', path);
         } catch (e) {
