@@ -41,11 +41,18 @@ export class GitignoreRules {
    * Get default .gitignore content
    */
   getDefaultContent(): string {
-    return `# Obsidian
-.obsidian/
-.trash/
+    return `# Obsidian - 不同步的文件
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
+.obsidian/plugins/*/main.js
+.obsidian/plugins/*/manifest.json
+.obsidian/plugins/*/styles.css
+.obsidian/plugins/*/data.json
+.obsidian/plugins/*/node_modules/
+.obsidian/cache/
+
+# 回收站
+.trash/
 
 # OS files
 .DS_Store
