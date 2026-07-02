@@ -15,10 +15,18 @@ export interface SyncState {
 export class SyncStateManager {
   private vault: Vault;
   private state: SyncState;
+  private debug: boolean;
 
-  constructor(vault: Vault) {
+  constructor(vault: Vault, debug: boolean = false) {
     this.vault = vault;
     this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
+    this.debug = debug;
+  }
+
+  private log(...args: any[]): void {
+    if (this.debug) {
+      console.log('[SyncState]', ...args);
+    }
   }
 
   /**
@@ -170,7 +178,7 @@ export class SyncStateManager {
         const localChanged = existsLocal && currentLocal.get(path) !== lastSha;
         const remoteChanged = existsRemote && currentRemote.get(path) !== lastSha;
 
-        console.log(`[SyncState] ${path}:`, {
+        this.log(`${path}:`, {
           lastSha: lastSha?.substring(0, 8),
           localHash: currentLocal.get(path)?.substring(0, 8),
           remoteSha: currentRemote.get(path)?.substring(0, 8),

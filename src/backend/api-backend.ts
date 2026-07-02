@@ -28,8 +28,9 @@ export class ApiBackend extends SyncBackend {
   private vault: Vault;
   private stateManager: SyncStateManager;
   private gitignore: GitignoreRules;
+  private debug: boolean;
 
-  constructor(vault: Vault, config: ApiConfig, gitignore?: GitignoreRules) {
+  constructor(vault: Vault, config: ApiConfig, gitignore?: GitignoreRules, debug: boolean = false) {
     super();
     this.vault = vault;
     this.config = config;
@@ -37,12 +38,19 @@ export class ApiBackend extends SyncBackend {
     this.baseUrl = config.baseUrl || this.getDefaultBaseUrl(config.provider);
     this.stateManager = new SyncStateManager(vault);
     this.gitignore = gitignore || new GitignoreRules();
-    console.log('[HybridGitSync] ApiBackend created', {
+    this.debug = debug;
+    this.log('ApiBackend created', {
       hasVault: !!vault,
       hasAdapter: !!vault?.adapter,
       repo: config.repo,
       branch: config.branch,
     });
+  }
+
+  private log(...args: any[]): void {
+    if (this.debug) {
+      console.log('[HybridGitSync]', ...args);
+    }
   }
 
   async isAvailable(): Promise<boolean> {
@@ -116,8 +124,8 @@ export class ApiBackend extends SyncBackend {
 
       // Get local file list
       const localFiles = await this.listLocalFiles('');
-      console.log('[HybridGitSync] Local files:', localFiles);
-      console.log('[HybridGitSync] Remote files:', remoteMap.size);
+      this.log('Local files:', localFiles);
+      this.log('Remote files:', remoteMap.size);
       let pushed = 0;
       const errors: string[] = [];
 
@@ -138,7 +146,7 @@ export class ApiBackend extends SyncBackend {
             }
           }
 
-          console.log('[HybridGitSync] Uploading:', localPath);
+          this.log('Uploading:', localPath);
           await this.putFile(localPath, localContent, remoteSha);
           pushed++;
           remoteMap.delete(localPath); // Mark as processed
@@ -192,15 +200,15 @@ export class ApiBackend extends SyncBackend {
 
       // Step 1: Load sync state
       await this.stateManager.load();
-      console.log('[HybridGitSync] Last sync:', this.stateManager.getLastSyncTime());
+      this.log('Last sync:', this.stateManager.getLastSyncTime());
 
       // Step 2: Get current remote file tree (single API call)
       const remoteMap = await this.getRemoteTree();
-      console.log('[HybridGitSync] Remote files:', remoteMap.size);
+      this.log('Remote files:', remoteMap.size);
 
       // Step 3: Get cached remote SHAs to detect remote changes
       const cachedRemoteShas = this.stateManager.getAllRemoteShas();
-      console.log('[HybridGitSync] Cached remote SHAs:', cachedRemoteShas.size);
+      this.log('Cached remote SHAs:', cachedRemoteShas.size);
 
       // Step 4: Determine which remote files actually changed
       const changedRemoteFiles = new Set<string>();
@@ -225,7 +233,7 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
-      console.log('[HybridGitSync] Remote changes:', {
+      this.log('Remote changes:', {
         new: newRemoteFiles.size,
         modified: changedRemoteFiles.size,
         deleted: deletedRemoteFiles.size,
@@ -240,18 +248,18 @@ export class ApiBackend extends SyncBackend {
           localMap.set(path, await this.gitBlobSha1(content));
         } catch {}
       }
-      console.log('[HybridGitSync] Local files:', localMap.size);
+      this.log('Local files:', localMap.size);
 
       // Step 6: Detect local changes
-      console.log('[HybridGitSync] Detecting changes...');
-      console.log('[HybridGitSync] Local map:', Array.from(localMap.entries()).slice(0, 5));
-      console.log('[HybridGitSync] Remote map:', Array.from(remoteMap.entries()).slice(0, 5));
-      console.log('[HybridGitSync] Cached remote SHAs:', Array.from(cachedRemoteShas.entries()).slice(0, 5));
-      console.log('[HybridGitSync] Stored files:', Array.from(this.stateManager.getKnownFiles().entries()).slice(0, 5));
+      this.log('Detecting changes...');
+      this.log('Local map:', Array.from(localMap.entries()).slice(0, 5));
+      this.log('Remote map:', Array.from(remoteMap.entries()).slice(0, 5));
+      this.log('Cached remote SHAs:', Array.from(cachedRemoteShas.entries()).slice(0, 5));
+      this.log('Stored files:', Array.from(this.stateManager.getKnownFiles().entries()).slice(0, 5));
 
       const actions = this.stateManager.detectChanges(localMap, remoteMap);
 
-      console.log('[HybridGitSync] Detected actions:', {
+      this.log('Detected actions:', {
         push: actions.pushToRemote.length,
         pull: actions.pullFromRemote.length,
         deleteRemote: actions.deleteFromRemote.length,
@@ -319,7 +327,7 @@ export class ApiBackend extends SyncBackend {
             // Same content - no action needed, just update state
             const contentHash = await this.gitBlobSha1(localContent);
             this.stateManager.setFileState(path, contentHash);
-            console.log('[HybridGitSync] Same content on both sides:', path);
+            this.log('Same content on both sides:', path);
           } else {
             // Different content - check who changed
             const storedHash = this.stateManager.getFileState(path);
@@ -329,24 +337,24 @@ export class ApiBackend extends SyncBackend {
 
               if (storedHash === localHash) {
                 // Local unchanged, remote changed → pull
-                console.log('[HybridGitSync] Remote changed, pulling:', path);
+                this.log('Remote changed, pulling:', path);
                 actions.pullFromRemote.push(path);
               } else if (storedHash === remoteHash) {
                 // Remote unchanged, local changed → push
-                console.log('[HybridGitSync] Local changed, pushing:', path);
+                this.log('Local changed, pushing:', path);
                 actions.pushToRemote.push(path);
               } else {
                 // Both changed → conflict
-                console.log('[HybridGitSync] Both changed, conflict:', path);
+                this.log('Both changed, conflict:', path);
                 actions.conflicts.push(path);
               }
             } else if (isFirstSync) {
               // First sync with no baseline - use remote as source of truth
-              console.log('[HybridGitSync] First sync, using remote version:', path);
+              this.log('First sync, using remote version:', path);
               actions.pullFromRemote.push(path);
             } else {
               // No stored hash, can't determine who changed → push local
-              console.log('[HybridGitSync] No baseline, pushing local:', path);
+              this.log('No baseline, pushing local:', path);
               actions.pushToRemote.push(path);
             }
           }
@@ -355,7 +363,7 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
-      console.log('[HybridGitSync] Actions:', {
+      this.log('Actions:', {
         push: actions.pushToRemote.length,
         pull: actions.pullFromRemote.length,
         deleteRemote: actions.deleteFromRemote.length,
@@ -385,7 +393,7 @@ export class ApiBackend extends SyncBackend {
               this.stateManager.setRemoteSha(path, remoteSha);
             }
             pulled++;
-            console.log('[HybridGitSync] Downloaded:', path);
+            this.log('Downloaded:', path);
           } catch (e) {
             errors.push(`pull ${path}: ${(e as Error).message}`);
           }
@@ -408,7 +416,7 @@ export class ApiBackend extends SyncBackend {
             // Update cached remote SHA
             this.stateManager.setRemoteSha(path, newSha);
             pushed++;
-            console.log('[HybridGitSync] Uploaded:', path);
+            this.log('Uploaded:', path);
           } catch (e) {
             errors.push(`push ${path}: ${(e as Error).message}`);
           }
@@ -426,7 +434,7 @@ export class ApiBackend extends SyncBackend {
             await this.deleteFile(path, sha);
             this.stateManager.removeFileState(path);
             deleted++;
-            console.log('[HybridGitSync] Deleted from remote:', path);
+            this.log('Deleted from remote:', path);
           }
         } catch (e) {
           errors.push(`delete remote ${path}: ${(e as Error).message}`);
@@ -440,7 +448,7 @@ export class ApiBackend extends SyncBackend {
           await this.vault.adapter.remove(path);
           this.stateManager.removeFileState(path);
           deleted++;
-          console.log('[HybridGitSync] Deleted locally:', path);
+          this.log('Deleted locally:', path);
         } catch (e) {
           errors.push(`delete local ${path}: ${(e as Error).message}`);
         }
@@ -845,9 +853,9 @@ export class ApiBackend extends SyncBackend {
   private async listLocalFiles(path: string): Promise<string[]> {
     const results: string[] = [];
     const listing = await this.vault.adapter.list(path);
-    console.log('[HybridGitSync] Scanning:', path || '/', '→', listing.files.length, 'files,', listing.folders.length, 'folders');
-    console.log('[HybridGitSync] Files:', listing.files);
-    console.log('[HybridGitSync] Folders:', listing.folders);
+    this.log('Scanning:', path || '/', '→', listing.files.length, 'files,', listing.folders.length, 'folders');
+    this.log('Files:', listing.files);
+    this.log('Folders:', listing.folders);
 
     for (const file of listing.files) {
       if (!this.shouldIgnore(file)) {
