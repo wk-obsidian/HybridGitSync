@@ -226,7 +226,8 @@ export class ApiBackend extends SyncBackend {
 
           if (localContent === remoteFile.content) {
             // Same content - no action needed, just update state
-            this.stateManager.setFileState(path, remoteMap.get(path)!);
+            const contentHash = await this.sha1(localContent);
+            this.stateManager.setFileState(path, contentHash);
             console.log('[HybridGitSync] Same content on both sides:', path);
           } else {
             // Different content - conflict
@@ -258,7 +259,9 @@ export class ApiBackend extends SyncBackend {
             try { await this.vault.adapter.mkdir(dir); } catch {}
           }
           await this.vault.adapter.write(path, remoteFile.content);
-          this.stateManager.setFileState(path, remoteMap.get(path)!);
+          // Store content hash (SHA-1) instead of Git blob SHA
+          const contentHash = await this.sha1(remoteFile.content);
+          this.stateManager.setFileState(path, contentHash);
           pulled++;
           console.log('[HybridGitSync] Downloaded:', path);
         } catch (e) {
@@ -272,8 +275,10 @@ export class ApiBackend extends SyncBackend {
         try {
           const content = await this.vault.adapter.read(path);
           const sha = remoteMap.get(path);
-          const newSha = await this.putFile(path, content, sha);
-          this.stateManager.setFileState(path, newSha);
+          await this.putFile(path, content, sha);
+          // Store content hash (SHA-1) instead of Git blob SHA
+          const contentHash = await this.sha1(content);
+          this.stateManager.setFileState(path, contentHash);
           pushed++;
           console.log('[HybridGitSync] Uploaded:', path);
         } catch (e) {
