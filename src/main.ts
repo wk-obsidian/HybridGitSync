@@ -5,6 +5,9 @@ import { GitBackend } from './backend/git-backend';
 import { ApiBackend, ApiProvider } from './backend/api-backend';
 import { StatusBar } from './ui/status-bar';
 import { ConflictModal } from './ui/conflict-modal';
+import { HistoryView, HISTORY_VIEW_TYPE } from './ui/history-view';
+import { DiffView, DIFF_VIEW_TYPE } from './ui/diff-view';
+import { ChangesView, CHANGES_VIEW_TYPE } from './ui/changes-view';
 import { ConflictResolver, ConflictInfo } from './sync/conflict';
 import { SyncQueue } from './sync/queue';
 import { NetworkStatus } from './utils/network';
@@ -31,6 +34,11 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Initialize UI
     this.statusBar = new StatusBar(this.addStatusBarItem());
     this.addSettingTab(new SettingsTab(this.app, this));
+
+    // Register views
+    this.registerView(HISTORY_VIEW_TYPE, (leaf) => new HistoryView(leaf));
+    this.registerView(DIFF_VIEW_TYPE, (leaf) => new DiffView(leaf));
+    this.registerView(CHANGES_VIEW_TYPE, (leaf) => new ChangesView(leaf));
 
     // Initialize backend
     try {
@@ -430,6 +438,100 @@ export default class HybridGitSyncPlugin extends Plugin {
         this.showNotice(`Auto sync ${this.settings.autoSync ? 'enabled' : 'disabled'}`);
       },
     });
+
+    this.addCommand({
+      id: 'view-history',
+      name: 'View commit history',
+      callback: () => this.showHistoryView(),
+    });
+
+    this.addCommand({
+      id: 'view-changes',
+      name: 'View changes',
+      callback: () => this.showChangesView(),
+    });
+
+    this.addCommand({
+      id: 'diff-current-file',
+      name: 'Diff current file',
+      callback: () => this.diffCurrentFile(),
+    });
+  }
+
+  // ===== Views =====
+
+  private async showHistoryView(): Promise<void> {
+    if (!(this.backend instanceof ApiBackend)) {
+      this.showNotice('History view is only available in API mode');
+      return;
+    }
+
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+
+    await leaf.setViewState({ type: HISTORY_VIEW_TYPE });
+    const view = leaf.view as HistoryView;
+
+    // Load commit history
+    const commits = await (this.backend as ApiBackend).getCommitHistory();
+    view.setCommits(commits);
+
+    view.onCommitSelected(async (commit) => {
+      const details = await (this.backend as ApiBackend).getCommitDetails(commit.sha);
+      if (details) {
+        view.setCommits([details, ...commits.filter(c => c.sha !== commit.sha)]);
+      }
+    });
+  }
+
+  private async showChangesView(): Promise<void> {
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+
+    await leaf.setViewState({ type: CHANGES_VIEW_TYPE });
+    const view = leaf.view as ChangesView;
+
+    // Load current changes
+    const status = await this.backend.status();
+    view.setChanges(status.changedFiles);
+
+    view.onFileClicked((path) => {
+      this.diffFile(path);
+    });
+  }
+
+  private async diffCurrentFile(): Promise<void> {
+    const activeFile = this.app.workspace.getActiveFile();
+    if (!activeFile) {
+      this.showNotice('No active file');
+      return;
+    }
+    await this.diffFile(activeFile.path);
+  }
+
+  private async diffFile(path: string): Promise<void> {
+    if (!(this.backend instanceof ApiBackend)) {
+      this.showNotice('Diff view is only available in API mode');
+      return;
+    }
+
+    const leaf = this.app.workspace.getRightLeaf(false);
+    if (!leaf) return;
+
+    await leaf.setViewState({ type: DIFF_VIEW_TYPE });
+    const view = leaf.view as DiffView;
+
+    // Get local content
+    let localContent = '';
+    try {
+      localContent = await this.app.vault.adapter.read(path);
+    } catch {}
+
+    // Get remote content
+    const remoteFile = await (this.backend as ApiBackend).getFile(path);
+    const remoteContent = remoteFile?.content || '';
+
+    view.setDiff(path, remoteContent, localContent);
   }
 
   // ===== Helpers =====

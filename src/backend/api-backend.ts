@@ -624,6 +624,112 @@ export class ApiBackend extends SyncBackend {
     return fileMap;
   }
 
+  // ===== History Methods =====
+
+  /**
+   * Get commit history
+   */
+  async getCommitHistory(limit: number = 50): Promise<any[]> {
+    try {
+      const data = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&per_page=${limit}`
+      );
+      return data.map((commit: any) => ({
+        sha: commit.sha,
+        message: commit.commit.message.split('\n')[0], // First line only
+        author: commit.commit.author.name,
+        date: commit.commit.author.date,
+        files: [], // Would need additional API call to get files
+      }));
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get commit history:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get commit details with changed files
+   */
+  async getCommitDetails(sha: string): Promise<any> {
+    try {
+      const data = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/commits/${sha}`
+      );
+      return {
+        sha: data.sha,
+        message: data.commit.message,
+        author: data.commit.author.name,
+        date: data.commit.author.date,
+        files: data.files?.map((f: any) => ({
+          path: f.filename,
+          status: f.status,
+          additions: f.additions,
+          deletions: f.deletions,
+        })) || [],
+      };
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get commit details:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get file history
+   */
+  async getFileHistory(path: string, limit: number = 20): Promise<any[]> {
+    try {
+      const data = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&path=${path}&per_page=${limit}`
+      );
+      return data.map((commit: any) => ({
+        sha: commit.sha,
+        message: commit.commit.message.split('\n')[0],
+        author: commit.commit.author.name,
+        date: commit.commit.author.date,
+      }));
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get file history:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Get file content at specific commit
+   */
+  async getFileAtCommit(path: string, sha: string): Promise<string | null> {
+    try {
+      const data = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/contents/${path}?ref=${sha}`
+      );
+      if (data.encoding === 'base64') {
+        try {
+          return decodeURIComponent(escape(atob(data.content)));
+        } catch {
+          return atob(data.content);
+        }
+      }
+      return data.content;
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get file at commit:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Get branches list
+   */
+  async getBranches(): Promise<string[]> {
+    try {
+      const data = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/branches`
+      );
+      return data.map((branch: any) => branch.name);
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get branches:', error);
+      return [];
+    }
+  }
+
   // ===== Private helpers =====
 
   /**
