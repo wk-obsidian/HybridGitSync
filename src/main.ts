@@ -54,9 +54,17 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Register commands
     this.registerCommands();
 
-    // Register ribbon icon
-    this.addRibbonIcon('sync', 'Hybrid Git Sync', async () => {
+    // Register ribbon icons
+    this.addRibbonIcon('sync', 'Sync Now', async () => {
       await this.performSync();
+    });
+
+    this.addRibbonIcon('history', 'View History', () => {
+      this.showHistoryView();
+    });
+
+    this.addRibbonIcon('git-branch', 'View Changes', () => {
+      this.showChangesView();
     });
 
     // Setup auto sync
