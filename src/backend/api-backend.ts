@@ -404,9 +404,24 @@ export class ApiBackend extends SyncBackend {
       );
       if (data.type !== 'file') return null;
 
-      const content = data.encoding === 'base64'
-        ? decodeURIComponent(escape(atob(data.content)))
-        : data.content;
+      let content: string;
+      if (data.encoding === 'base64') {
+        try {
+          content = decodeURIComponent(escape(atob(data.content)));
+        } catch (e) {
+          console.warn('[HybridGitSync] URI decode failed for:', path, '- trying fallback');
+          // Fallback: try direct atob without URI decoding
+          try {
+            content = atob(data.content);
+          } catch {
+            // If still fails, use raw content
+            console.warn('[HybridGitSync] atob also failed for:', path, '- using raw content');
+            content = data.content;
+          }
+        }
+      } else {
+        content = data.content;
+      }
 
       return { content, sha: data.sha };
     } catch (error: any) {
