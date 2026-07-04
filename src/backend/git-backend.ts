@@ -71,7 +71,20 @@ export class GitBackend extends SyncBackend {
   async push(): Promise<SyncResult> {
     try {
       const branch = (await this.exec('rev-parse --abbrev-ref HEAD')).trim();
-      const output = await this.exec(`push -u origin ${branch}`);
+
+      // Check if upstream is already set
+      let hasUpstream = false;
+      try {
+        await this.exec(`rev-parse --abbrev-ref ${branch}@{upstream}`);
+        hasUpstream = true;
+      } catch {
+        // No upstream set
+      }
+
+      // Use -u flag only if upstream is not set
+      const pushCmd = hasUpstream ? 'push' : `push -u origin ${branch}`;
+      const output = await this.exec(pushCmd);
+
       return {
         success: true,
         message: output.trim(),
