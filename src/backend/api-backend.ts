@@ -2,6 +2,7 @@ import { requestUrl, RequestUrlResponse, Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 import { SyncStateManager } from '../sync/state';
 import { GitignoreRules } from '../utils/gitignore';
+import { t } from '../i18n';
 
 export type ApiProvider = 'github' | 'gitlab' | 'gitea';
 
@@ -494,9 +495,16 @@ export class ApiBackend extends SyncBackend {
       // Step 14: Save sync state
       await this.stateManager.save();
 
-      const message = `Sync completed: pulled ${pulled}, pushed ${pushed}, deleted ${deleted}` +
-        (actions.conflicts.length > 0 ? `, conflicts ${actions.conflicts.length}` : '') +
-        (errors.length > 0 ? `, errors ${errors.length}` : '');
+      // Build message using i18n
+      let message: string;
+      const params = { pulled, pushed, deleted };
+      if (actions.conflicts.length > 0) {
+        message = t('sync.completed.withConflicts', { ...params, conflicts: actions.conflicts.length });
+      } else if (errors.length > 0) {
+        message = t('sync.completed.withErrors', { ...params, errors: errors.length });
+      } else {
+        message = t('sync.completed', params);
+      }
 
       return {
         success: errors.length === 0 && actions.conflicts.length === 0,
@@ -509,7 +517,7 @@ export class ApiBackend extends SyncBackend {
     } catch (error) {
       return {
         success: false,
-        message: `Sync failed: ${(error as Error).message}`,
+        message: t('sync.failed', { message: (error as Error).message }),
         error: error as Error,
       };
     }
