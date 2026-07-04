@@ -1,4 +1,5 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian';
+import { t } from '../i18n';
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'conflict' | 'offline';
 
@@ -42,21 +43,21 @@ export class StatusBar {
       case 'idle':
         if (this.lastSyncTime) {
           const ago = this.getTimeAgo(this.lastSyncTime);
-          return `Synced ${ago}`;
+          return t('status.synced', { time: ago });
         }
-        return 'Ready';
-      case 'syncing': return 'Syncing...';
-      case 'error': return 'Sync failed';
-      case 'conflict': return 'Conflicts detected';
-      case 'offline': return 'Offline';
+        return t('status.ready');
+      case 'syncing': return t('status.syncing');
+      case 'error': return t('status.failed');
+      case 'conflict': return t('status.conflicts');
+      case 'offline': return t('status.offline');
     }
   }
 
   private getTimeAgo(date: Date): string {
     const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
-    if (seconds < 60) return 'just now';
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-    return `${Math.floor(seconds / 86400)}d ago`;
+    if (seconds < 60) return t('time.justNow');
+    if (seconds < 3600) return t('time.minutesAgo', { count: Math.floor(seconds / 60) });
+    if (seconds < 86400) return t('time.hoursAgo', { count: Math.floor(seconds / 3600) });
+    return t('time.daysAgo', { count: Math.floor(seconds / 86400) });
   }
 }

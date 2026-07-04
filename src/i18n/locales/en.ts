@@ -62,6 +62,20 @@ export default {
   'ui.noCommits': 'No commits found',
   'ui.noDifferences': 'No differences',
 
+  // Status bar
+  'status.ready': 'Ready',
+  'status.syncing': 'Syncing...',
+  'status.synced': 'Synced {time}',
+  'status.failed': 'Sync failed',
+  'status.conflicts': 'Conflicts detected',
+  'status.offline': 'Offline',
+
+  // Time
+  'time.justNow': 'just now',
+  'time.minutesAgo': '{count}m ago',
+  'time.hoursAgo': '{count}h ago',
+  'time.daysAgo': '{count}d ago',
+
   // Log prefixes
   'log.syncState': '[SyncState]',
   'log.plugin': '[HybridGitSync]',

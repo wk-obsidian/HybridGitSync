@@ -62,6 +62,20 @@ export default {
   'ui.noCommits': '无提交记录',
   'ui.noDifferences': '无差异',
 
+  // 状态栏
+  'status.ready': '就绪',
+  'status.syncing': '同步中...',
+  'status.synced': '已同步 {time}',
+  'status.failed': '同步失败',
+  'status.conflicts': '检测到冲突',
+  'status.offline': '离线',
+
+  // 时间
+  'time.justNow': '刚刚',
+  'time.minutesAgo': '{count}分钟前',
+  'time.hoursAgo': '{count}小时前',
+  'time.daysAgo': '{count}天前',
+
   // 日志前缀
   'log.syncState': '[同步状态]',
   'log.plugin': '[混合Git同步]',
