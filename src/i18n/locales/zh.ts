@@ -94,6 +94,14 @@ export default {
   'time.hoursAgo': '{count}小时前',
   'time.daysAgo': '{count}天前',
 
+  // .gitignore 注释
+  'gitignore.obsidianDeviceFiles': 'Obsidian - 设备相关文件',
+  'gitignore.pluginsDirectory': '插件目录（代码、配置、依赖全部忽略）',
+  'gitignore.cache': '缓存',
+  'gitignore.trash': '回收站',
+  'gitignore.osFiles': '操作系统文件',
+  'gitignore.tempFiles': '临时文件',
+
   // 日志前缀
   'log.syncState': '[同步状态]',
   'log.plugin': '[混合Git同步]',

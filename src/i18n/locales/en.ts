@@ -94,6 +94,14 @@ export default {
   'time.hoursAgo': '{count}h ago',
   'time.daysAgo': '{count}d ago',
 
+  // .gitignore comments
+  'gitignore.obsidianDeviceFiles': 'Obsidian - Device-specific files',
+  'gitignore.pluginsDirectory': 'Plugins directory (code, config, dependencies)',
+  'gitignore.cache': 'Cache',
+  'gitignore.trash': 'Trash',
+  'gitignore.osFiles': 'OS files',
+  'gitignore.tempFiles': 'Temp files',
+
   // Log prefixes
   'log.syncState': '[SyncState]',
   'log.plugin': '[HybridGitSync]',

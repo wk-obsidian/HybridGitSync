@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 /**
  * .gitignore pattern parser and matcher
  */
@@ -38,27 +40,27 @@ export class GitignoreRules {
   }
 
   /**
-   * Get default .gitignore content
+   * Get default .gitignore content with localized comments
    */
   getDefaultContent(): string {
-    return `# Obsidian - 设备相关文件
+    return `# ${t('gitignore.obsidianDeviceFiles')}
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
 
-# 插件目录（代码、配置、依赖全部忽略）
+# ${t('gitignore.pluginsDirectory')}
 .obsidian/plugins/
 
-# 缓存
+# ${t('gitignore.cache')}
 .obsidian/cache/
 
-# 回收站
+# ${t('gitignore.trash')}
 .trash/
 
-# OS files
+# ${t('gitignore.osFiles')}
 .DS_Store
 Thumbs.db
 
-# Temp files
+# ${t('gitignore.tempFiles')}
 *.tmp
 *.bak
 `;
