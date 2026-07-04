@@ -63,6 +63,9 @@ Thumbs.db
 # ${t('gitignore.tempFiles')}
 *.tmp
 *.bak
+*.swp
+*.swo
+*~
 `;
   }
 
