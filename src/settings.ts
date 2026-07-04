@@ -2,6 +2,9 @@ import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
 
 export interface PluginSettings {
+  // General
+  language: 'auto' | 'en' | 'zh';  // UI language
+
   // Backend
   backend: 'auto' | 'git' | 'api';
 
@@ -34,6 +37,7 @@ export interface PluginSettings {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
+  language: 'auto',
   backend: 'auto',
   remoteUrl: '',
   branch: 'main',
@@ -71,11 +75,29 @@ export class SettingsTab extends PluginSettingTab {
     infoEl.createEl('span', { text: `Current platform: ${this.plugin.getPlatformName()} | Backend: ${this.plugin.getActiveBackendName()}` });
     containerEl.createEl('hr');
 
+    this.renderGeneralSettings(containerEl);
     this.renderBackendSettings(containerEl);
     this.renderRemoteSettings(containerEl);
     this.renderAutoSyncSettings(containerEl);
     this.renderBehaviorSettings(containerEl);
     this.renderAdvancedSettings(containerEl);
+  }
+
+  private renderGeneralSettings(el: HTMLElement): void {
+    el.createEl('h3', { text: 'General' });
+
+    new Setting(el)
+      .setName('Language')
+      .setDesc('UI language (requires restart)')
+      .addDropdown(cb => cb
+        .addOption('auto', 'Auto (detect from system)')
+        .addOption('en', 'English')
+        .addOption('zh', '中文')
+        .setValue(this.plugin.settings.language)
+        .onChange(async (value) => {
+          this.plugin.settings.language = value as PluginSettings['language'];
+          await this.plugin.saveSettings();
+        }));
   }
 
   private renderBackendSettings(el: HTMLElement): void {

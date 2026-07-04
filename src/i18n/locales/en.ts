@@ -1,0 +1,68 @@
+export default {
+  // Sync messages
+  'sync.completed': 'Sync completed: pulled {pulled}, pushed {pushed}, deleted {deleted}',
+  'sync.completed.withConflicts': 'Sync completed: pulled {pulled}, pushed {pushed}, deleted {deleted}, conflicts {conflicts}',
+  'sync.completed.withErrors': 'Sync completed: pulled {pulled}, pushed {pushed}, deleted {deleted}, errors {errors}',
+  'sync.failed': 'Sync failed: {message}',
+  'sync.skipped.offline': 'Offline. Sync will resume when network is available.',
+  'sync.skipped.noRemote': 'Please configure remote repository in settings.',
+  'sync.skipped.backendNotAvailable': '{backend} backend is not available. Check settings.',
+  'sync.skipped.backendNotInitialized': 'Backend not initialized. Please check settings.',
+  'sync.skipped.cannotReach': 'Cannot reach remote. Check network connection.',
+  'sync.skipped.emptyRemote': 'Remote returned empty file list. Skipping sync to prevent data loss.',
+  'sync.skipped.resolvingConflicts': 'Sync skipped: resolving conflicts',
+
+  // Conflict messages
+  'conflict.detected': '{count} conflict(s) detected',
+  'conflict.resolved': 'Resolved {path}: {resolution}',
+  'conflict.allResolved': 'All conflicts resolved',
+  'conflict.rebaseInProgress': 'Git rebase in progress. Please resolve manually: git rebase --abort OR git rebase --continue',
+  'conflict.mergeInProgress': 'Git merge in progress. Please resolve conflicts and run: git merge --continue',
+  'conflict.cherryPickInProgress': 'Git cherry-pick in progress. Please resolve manually.',
+
+  // File operations
+  'file.downloaded': 'Downloaded: {path}',
+  'file.uploaded': 'Uploaded: {path}',
+  'file.deletedRemote': 'Deleted from remote: {path}',
+  'file.deletedLocal': 'Deleted locally: {path}',
+  'file.skippedLarge': 'Skipping large file: {path} ({size})',
+  'file.conflict': 'Conflict (different content): {path}',
+  'file.sameContent': 'Same content on both sides: {path}',
+  'file.remoteChanged': 'Remote changed, pulling: {path}',
+  'file.localChanged': 'Local changed, pushing: {path}',
+  'file.bothChanged': 'Both changed, conflict: {path}',
+  'file.firstSync': 'First sync, using remote version: {path}',
+  'file.noBaseline': 'No baseline, pushing local: {path}',
+
+  // Settings
+  'settings.exported': 'Settings exported to .obsidian/plugins/hybrid-git-sync/settings-export.json',
+  'settings.imported': 'Settings imported successfully',
+  'settings.importFailed': 'Failed to import settings',
+  'settings.syncStateCleared': 'Sync state cleared',
+
+  // Notices
+  'notice.syncCompleted': 'Sync completed',
+  'notice.pullCompleted': 'Pull completed',
+  'notice.pushCompleted': 'Push completed',
+  'notice.offline': 'Offline',
+  'notice.autoSyncEnabled': 'Auto sync enabled',
+  'notice.autoSyncDisabled': 'Auto sync disabled',
+
+  // UI
+  'ui.history': 'Git History',
+  'ui.changes': 'Changes',
+  'ui.diff': 'File Diff',
+  'ui.resolveConflict': 'Resolve Conflict',
+  'ui.keepLocal': 'Keep Local',
+  'ui.keepRemote': 'Keep Remote',
+  'ui.saveBoth': 'Save Both',
+  'ui.skip': 'Skip',
+  'ui.processing': 'Processing...',
+  'ui.noChanges': 'No changes',
+  'ui.noCommits': 'No commits found',
+  'ui.noDifferences': 'No differences',
+
+  // Log prefixes
+  'log.syncState': '[SyncState]',
+  'log.plugin': '[HybridGitSync]',
+};

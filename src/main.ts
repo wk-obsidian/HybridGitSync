@@ -15,6 +15,7 @@ import { GitignoreRules } from './utils/gitignore';
 import { Logger, LogLevel } from './utils/logger';
 import { SettingsIO } from './utils/settings-io';
 import { getPlatformType, getPlatformName, isDesktop } from './utils/platform';
+import { t, I18n } from './i18n';
 
 export default class HybridGitSyncPlugin extends Plugin {
   settings!: PluginSettings;
@@ -25,11 +26,15 @@ export default class HybridGitSyncPlugin extends Plugin {
   gitignore!: GitignoreRules;
   logger!: Logger;
   settingsIO!: SettingsIO;
+  i18n!: I18n;
   private autoSyncInterval: number | null = null;
   private isResolvingConflicts = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
+
+    // Initialize i18n
+    this.i18n = new I18n(this.settings.language === 'auto' ? undefined : this.settings.language);
 
     // Initialize utilities
     this.logger = new Logger('HybridGitSync', this.settings.debug ? LogLevel.DEBUG : LogLevel.INFO);
@@ -209,20 +214,20 @@ export default class HybridGitSyncPlugin extends Plugin {
     }
 
     if (!this.settings.remoteUrl) {
-      this.showNotice('Please configure remote repository in settings.');
+      this.showNotice(t('sync.skipped.noRemote'));
       return;
     }
 
     if (!this.network.isOnline()) {
       this.statusBar.setState('offline');
-      this.showNotice('Offline. Sync will resume when network is available.');
+      this.showNotice(t('sync.skipped.offline'));
       return;
     }
 
     // Check if backend is initialized
     if (!this.backend) {
       this.statusBar.setState('error', 'Backend not initialized');
-      this.showNotice('Backend not initialized. Please check settings.');
+      this.showNotice(t('sync.skipped.backendNotInitialized'));
       return;
     }
 
@@ -230,7 +235,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     const available = await this.backend.isAvailable();
     if (!available) {
       this.statusBar.setState('error', 'Backend not available');
-      this.showNotice(`${this.backend.name} backend is not available. Check settings.`);
+      this.showNotice(t('sync.skipped.backendNotAvailable', { backend: this.backend.name }));
       return;
     }
 
