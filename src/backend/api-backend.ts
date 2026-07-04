@@ -682,31 +682,22 @@ export class ApiBackend extends SyncBackend {
   async getRemoteTree(): Promise<Map<string, string>> {
     const fileMap = new Map<string, string>(); // path -> sha
 
-    try {
-      // Get the tree SHA for the branch
-      const branchInfo = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
-      );
-      const treeSha = branchInfo.object.sha;
+    // Get the tree SHA for the branch
+    const branchInfo = await this.apiRequest('GET',
+      `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+    );
+    const treeSha = branchInfo.object.sha;
 
-      // Get the entire tree recursively
-      const tree = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/git/trees/${treeSha}?recursive=1`
-      );
+    // Get the entire tree recursively
+    const tree = await this.apiRequest('GET',
+      `/repos/${this.config.repo}/git/trees/${treeSha}?recursive=1`
+    );
 
-      if (tree.tree) {
-        for (const item of tree.tree) {
-          if (item.type === 'blob') { // Only files, not directories
-            fileMap.set(item.path, item.sha);
-          }
+    if (tree.tree) {
+      for (const item of tree.tree) {
+        if (item.type === 'blob') { // Only files, not directories
+          fileMap.set(item.path, item.sha);
         }
-      }
-    } catch (error) {
-      console.error('[HybridGitSync] Failed to get remote tree:', error);
-      // Fallback to listing files individually
-      const files = await this.listFilesRecursive('');
-      for (const f of files) {
-        fileMap.set(f.path, f.sha);
       }
     }
 
