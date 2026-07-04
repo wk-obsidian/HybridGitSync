@@ -1,5 +1,6 @@
 import { App, Modal, Setting } from 'obsidian';
 import { ConflictInfo, ConflictResolution, DiffResult, DiffLine } from '../sync/conflict';
+import { t } from '../i18n';
 
 /**
  * Modal for resolving file conflicts
@@ -25,7 +26,7 @@ export class ConflictModal extends Modal {
     const { contentEl } = this;
     contentEl.empty();
 
-    contentEl.createEl('h2', { text: 'Resolve Conflict' });
+    contentEl.createEl('h2', { text: t('ui.resolveConflict') });
     contentEl.createEl('p', { text: `File: ${this.conflict.path}` });
 
     // Diff stats
@@ -75,10 +76,10 @@ export class ConflictModal extends Modal {
     buttonEl.style.marginTop = '16px';
     buttonEl.style.justifyContent = 'flex-end';
 
-    this.createButton(buttonEl, 'Keep Local', 'local', 'var(--text-accent)');
-    this.createButton(buttonEl, 'Keep Remote', 'remote', 'var(--text-warning)');
-    this.createButton(buttonEl, 'Save Both', 'both', 'var(--text-muted)');
-    this.createButton(buttonEl, 'Skip', 'skip', 'var(--text-faint)');
+    this.createButton(buttonEl, t('ui.keepLocal'), 'local', 'var(--text-accent)');
+    this.createButton(buttonEl, t('ui.keepRemote'), 'remote', 'var(--text-warning)');
+    this.createButton(buttonEl, t('ui.saveBoth'), 'both', 'var(--text-muted)');
+    this.createButton(buttonEl, t('ui.skip'), 'skip', 'var(--text-faint)');
   }
 
   private createButton(parent: HTMLElement, text: string, resolution: ConflictResolution, color: string): void {
@@ -92,7 +93,7 @@ export class ConflictModal extends Modal {
 
     btn.addEventListener('click', async () => {
       btn.disabled = true;
-      btn.setText('Processing...');
+      btn.setText(t('ui.processing'));
       try {
         await this.onResolve(resolution);
         this.close();
