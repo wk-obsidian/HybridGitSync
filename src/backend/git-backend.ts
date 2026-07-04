@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
+import { t } from '../i18n';
 
 export class GitBackend extends SyncBackend {
   readonly name = 'git';
@@ -160,7 +161,7 @@ export class GitBackend extends SyncBackend {
       if (status.includes('rebase') || status.includes('REBASE')) {
         return {
           ok: false,
-          message: 'Git rebase in progress. Please resolve manually: git rebase --abort OR git rebase --continue',
+          message: t('conflict.rebaseInProgress'),
         };
       }
 
@@ -168,7 +169,7 @@ export class GitBackend extends SyncBackend {
       if (status.includes('merge') || status.includes('MERGE')) {
         return {
           ok: false,
-          message: 'Git merge in progress. Please resolve conflicts and run: git merge --continue',
+          message: t('conflict.mergeInProgress'),
         };
       }
 
@@ -176,7 +177,7 @@ export class GitBackend extends SyncBackend {
       if (status.includes('cherry-pick') || status.includes('CHERRY_PICK')) {
         return {
           ok: false,
-          message: 'Git cherry-pick in progress. Please resolve manually.',
+          message: t('conflict.cherryPickInProgress'),
         };
       }
 
