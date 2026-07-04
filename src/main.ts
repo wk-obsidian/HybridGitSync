@@ -57,7 +57,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       await this.initBackend();
     } catch (error) {
       console.error('[HybridGitSync] Failed to initialize backend:', error);
-      this.showNotice('Failed to initialize sync backend. Check settings.');
+      this.showNotice(t('notice.initFailed'));
     }
 
     // Load gitignore rules
@@ -134,7 +134,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     if (useBackend === 'git') {
       if (!isDesktop()) {
-        this.showNotice('Git backend is not available on mobile. Using API backend.');
+        this.showNotice(t('notice.gitNotAvailable'));
         this.backend = this.createApiBackend();
       } else {
         let remoteUrl = this.settings.remoteUrl;
@@ -188,7 +188,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       try {
         await this.app.vault.adapter.write('.gitignore', defaultContent);
         this.gitignore.addRules(defaultContent);
-        this.showNotice('Created .gitignore with default rules');
+        this.showNotice(t('notice.gitignoreCreated'));
       } catch (error) {
         console.error('[HybridGitSync] Failed to create .gitignore:', error);
         // Fallback to built-in patterns
@@ -379,7 +379,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
       new ConflictModal(this.app, conflict, diff, async (resolution) => {
         await resolver.resolve(conflict, resolution);
-        this.showNotice(`Resolved ${conflict.path}: ${resolution}`);
+        this.showNotice(t('notice.conflictResolved', { path: conflict.path, resolution }));
         current++;
         processNext();
       }).open();
@@ -461,17 +461,17 @@ export default class HybridGitSyncPlugin extends Plugin {
       name: 'Pull',
       callback: async () => {
         if (!this.network.isOnline()) {
-          this.showNotice('Offline');
+          this.showNotice(t('notice.offline'));
           return;
         }
         this.statusBar.setState('syncing');
         const result = await this.backend.pull();
         if (result.success) {
           this.statusBar.setState('idle');
-          this.showNotice('Pull completed');
+          this.showNotice(t('notice.pullCompleted'));
         } else {
           this.statusBar.setState('error', result.message);
-          this.showNotice(`Pull failed: ${result.message}`);
+          this.showNotice(t('notice.pullFailed', { message: result.message }));
         }
       },
     });
@@ -481,17 +481,17 @@ export default class HybridGitSyncPlugin extends Plugin {
       name: 'Push',
       callback: async () => {
         if (!this.network.isOnline()) {
-          this.showNotice('Offline');
+          this.showNotice(t('notice.offline'));
           return;
         }
         this.statusBar.setState('syncing');
         const result = await this.backend.push();
         if (result.success) {
           this.statusBar.setState('idle');
-          this.showNotice('Push completed');
+          this.showNotice(t('notice.pushCompleted'));
         } else {
           this.statusBar.setState('error', result.message);
-          this.showNotice(`Push failed: ${result.message}`);
+          this.showNotice(t('notice.pushFailed', { message: result.message }));
         }
       },
     });
@@ -518,7 +518,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       callback: async () => {
         this.settings.autoSync = !this.settings.autoSync;
         await this.saveSettings();
-        this.showNotice(`Auto sync ${this.settings.autoSync ? 'enabled' : 'disabled'}`);
+        this.showNotice(t('notice.autoSyncToggled', { status: this.settings.autoSync ? t('notice.autoSyncEnabled') : t('notice.autoSyncDisabled') }));
       },
     });
 
@@ -581,7 +581,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private showLogs(): void {
     const logs = this.logger.getLogsAsString();
-    const notice = new Notice('Logs copied to clipboard', 5000);
+    const notice = new Notice(t('notice.logsCopied'), 5000);
     navigator.clipboard.writeText(logs);
   }
 
@@ -589,7 +589,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private async exportSettings(): Promise<void> {
     await this.settingsIO.exportSettings(this.settings);
-    this.showNotice('Settings exported to .obsidian/plugins/hybrid-git-sync/settings-export.json');
+    this.showNotice(t('notice.settingsExported'));
   }
 
   private async importSettings(): Promise<void> {
@@ -597,9 +597,9 @@ export default class HybridGitSyncPlugin extends Plugin {
     if (imported) {
       this.settings = { ...this.settings, ...imported };
       await this.saveSettings();
-      this.showNotice('Settings imported successfully');
+      this.showNotice(t('notice.settingsImported'));
     } else {
-      this.showNotice('Failed to import settings');
+      this.showNotice(t('notice.settingsImportFailed'));
     }
   }
 
@@ -610,7 +610,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       const stateManager = (this.backend as ApiBackend).getStateManager();
       stateManager.clear();
       await stateManager.save();
-      this.showNotice('Sync state cleared');
+      this.showNotice(t('notice.syncStateCleared'));
     }
   }
 
@@ -619,23 +619,23 @@ export default class HybridGitSyncPlugin extends Plugin {
   private async restoreCurrentFile(): Promise<void> {
     const activeFile = this.app.workspace.getActiveFile();
     if (!activeFile) {
-      this.showNotice('No active file');
+      this.showNotice(t('notice.noActiveFile'));
       return;
     }
 
     if (!(this.backend instanceof ApiBackend)) {
-      this.showNotice('Restore is only available in API mode');
+      this.showNotice(t('notice.restoreApiOnly'));
       return;
     }
 
     const remoteFile = await (this.backend as ApiBackend).getFile(activeFile.path);
     if (!remoteFile) {
-      this.showNotice('File not found on remote');
+      this.showNotice(t('notice.fileNotFound'));
       return;
     }
 
     await this.app.vault.adapter.write(activeFile.path, remoteFile.content);
-    this.showNotice(`Restored ${activeFile.path} from remote`);
+    this.showNotice(t('notice.fileRestored', { path: activeFile.path }));
   }
 
   // ===== Branch Management =====
