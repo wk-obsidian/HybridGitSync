@@ -88,6 +88,16 @@ export class GitBackend extends SyncBackend {
 
   async sync(): Promise<SyncResult> {
     try {
+      // Step 0: Check git state before syncing
+      const stateCheck = await this.checkGitState();
+      if (!stateCheck.ok) {
+        return {
+          success: false,
+          message: stateCheck.message,
+          error: new Error(stateCheck.message),
+        };
+      }
+
       // Step 1: Stage all changes
       await this.exec('add -A');
 
@@ -122,6 +132,47 @@ export class GitBackend extends SyncBackend {
         success: false,
         message: `Sync failed: ${(error as Error).message}`,
         error: error as Error,
+      };
+    }
+  }
+
+  /**
+   * Check git state and return error if abnormal
+   */
+  private async checkGitState(): Promise<{ ok: boolean; message: string }> {
+    try {
+      const status = await this.exec('status');
+
+      // Check for rebase in progress
+      if (status.includes('rebase') || status.includes('REBASE')) {
+        return {
+          ok: false,
+          message: 'Git rebase in progress. Please resolve manually: git rebase --abort OR git rebase --continue',
+        };
+      }
+
+      // Check for merge in progress
+      if (status.includes('merge') || status.includes('MERGE')) {
+        return {
+          ok: false,
+          message: 'Git merge in progress. Please resolve conflicts and run: git merge --continue',
+        };
+      }
+
+      // Check for cherry-pick in progress
+      if (status.includes('cherry-pick') || status.includes('CHERRY_PICK')) {
+        return {
+          ok: false,
+          message: 'Git cherry-pick in progress. Please resolve manually.',
+        };
+      }
+
+      return { ok: true, message: '' };
+    } catch (error) {
+      // If git status fails, might be in a bad state
+      return {
+        ok: false,
+        message: `Git state check failed: ${(error as Error).message}`,
       };
     }
   }
