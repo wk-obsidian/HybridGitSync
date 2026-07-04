@@ -203,12 +203,30 @@ export class ApiBackend extends SyncBackend {
       this.log('Last sync:', this.stateManager.getLastSyncTime());
 
       // Step 2: Get current remote file tree (single API call)
-      const remoteMap = await this.getRemoteTree();
-      this.log('Remote files:', remoteMap.size);
+      let remoteMap: Map<string, string>;
+      try {
+        remoteMap = await this.getRemoteTree();
+        this.log('Remote files:', remoteMap.size);
+      } catch (error) {
+        // Network error - cannot reach remote
+        console.warn('[HybridGitSync] Cannot reach remote, skipping sync:', (error as Error).message);
+        return {
+          success: false,
+          message: 'Cannot reach remote. Check network connection.',
+          error: error as Error,
+        };
+      }
 
-      // Step 3: Get cached remote SHAs to detect remote changes
+      // Safety check: if remoteMap is empty but we have cached SHAs, something is wrong
       const cachedRemoteShas = this.stateManager.getAllRemoteShas();
       this.log('Cached remote SHAs:', cachedRemoteShas.size);
+      if (remoteMap.size === 0 && cachedRemoteShas.size > 0) {
+        console.warn('[HybridGitSync] Remote returned empty file list, skipping sync to prevent data loss');
+        return {
+          success: false,
+          message: 'Remote returned empty file list. Skipping sync to prevent data loss.',
+        };
+      }
 
       // Step 4: Determine which remote files actually changed
       const changedRemoteFiles = new Set<string>();
