@@ -25,7 +25,7 @@ export class SyncStateManager {
     this.debug = debug;
   }
 
-  private log(...args: any[]): void {
+  private log(...args: unknown[]): void {
     if (this.debug) {
       console.log('[SyncState]', ...args);
     }

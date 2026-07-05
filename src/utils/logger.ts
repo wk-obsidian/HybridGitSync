@@ -29,7 +29,7 @@ export class Logger {
   /**
    * Debug log
    */
-  debug(...args: any[]): void {
+  debug(...args: unknown[]): void {
     if (this.level <= LogLevel.DEBUG) {
       this.log(LogLevel.DEBUG, ...args);
     }
@@ -38,7 +38,7 @@ export class Logger {
   /**
    * Info log
    */
-  info(...args: any[]): void {
+  info(...args: unknown[]): void {
     if (this.level <= LogLevel.INFO) {
       this.log(LogLevel.INFO, ...args);
     }
@@ -47,7 +47,7 @@ export class Logger {
   /**
    * Warning log
    */
-  warn(...args: any[]): void {
+  warn(...args: unknown[]): void {
     if (this.level <= LogLevel.WARN) {
       this.log(LogLevel.WARN, ...args);
     }
@@ -56,7 +56,7 @@ export class Logger {
   /**
    * Error log
    */
-  error(...args: any[]): void {
+  error(...args: unknown[]): void {
     if (this.level <= LogLevel.ERROR) {
       this.log(LogLevel.ERROR, ...args);
     }
@@ -65,7 +65,7 @@ export class Logger {
   /**
    * Internal log method
    */
-  private log(level: LogLevel, ...args: any[]): void {
+  private log(level: LogLevel, ...args: unknown[]): void {
     const timestamp = new Date().toISOString();
     const levelStr = LogLevel[level].padEnd(5);
     const message = `[${this.prefix}] [${levelStr}] ${timestamp}`;

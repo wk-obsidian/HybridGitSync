@@ -748,7 +748,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     new Notice(message, timeout);
   }
 
-  private log(...args: any[]): void {
+  private log(...args: unknown[]): void {
     if (this.settings.debug) {
       console.log('[HybridGitSync]', ...args);
     }
