@@ -136,7 +136,7 @@ export class ConflictResolver {
           break;
         }
 
-        case 'remote':
+        case 'remote': {
           // Keep remote version, write to local
           console.log('[ConflictResolver] Writing remote content to local...');
           await this.vault.adapter.write(conflict.path, conflict.remoteContent);
@@ -145,8 +145,9 @@ export class ConflictResolver {
           this.stateManager.setFileState(conflict.path, remoteHash);
           // Remote SHA stays the same (we're using remote's version)
           break;
+        }
 
-        case 'both':
+        case 'both': {
           // Save both versions
           const ext = conflict.path.lastIndexOf('.');
           const baseName = ext > -1 ? conflict.path.substring(0, ext) : conflict.path;
@@ -165,6 +166,7 @@ export class ConflictResolver {
           this.stateManager.removeFileState(conflict.path);
           this.stateManager.removeRemoteSha(conflict.path);
           break;
+        }
 
         case 'skip':
           console.log('[ConflictResolver] Skipping conflict');
