@@ -15,3 +15,9 @@ Thumbs.db
 
 # npm
 npm-debug.log*
+
+# Release artifacts
+hybrid-git-sync*
+
+# Claude
+.claude
