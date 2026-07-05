@@ -1,16 +1,18 @@
 import { Vault } from 'obsidian';
 import { PluginSettings } from '../settings';
 
-const SETTINGS_EXPORT_FILE = '.obsidian/plugins/hybrid-git-sync/settings-export.json';
+const SETTINGS_EXPORT_FILE_NAME = 'plugins/hybrid-git-sync/settings-export.json';
 
 /**
  * Settings import/export utility
  */
 export class SettingsIO {
   private vault: Vault;
+  private exportFile: string;
 
   constructor(vault: Vault) {
     this.vault = vault;
+    this.exportFile = `${vault.configDir}/${SETTINGS_EXPORT_FILE_NAME}`;
   }
 
   /**
@@ -22,13 +24,12 @@ export class SettingsIO {
       exportDate: new Date().toISOString(),
       settings: {
         ...settings,
-        // Exclude sensitive data
         apiToken: settings.apiToken ? '***REDACTED***' : '',
       },
     };
 
     const content = JSON.stringify(exportData, null, 2);
-    await this.vault.adapter.write(SETTINGS_EXPORT_FILE, content);
+    await this.vault.adapter.write(this.exportFile, content);
   }
 
   /**
@@ -36,14 +37,13 @@ export class SettingsIO {
    */
   async importSettings(): Promise<PluginSettings | null> {
     try {
-      const content = await this.vault.adapter.read(SETTINGS_EXPORT_FILE);
-      const data = JSON.parse(content);
+      const content = await this.vault.adapter.read(this.exportFile);
+      const data = JSON.parse(content) as { version: string; settings: PluginSettings };
 
       if (!data.version || !data.settings) {
         throw new Error('Invalid settings file format');
       }
 
-      // Don't import token for security
       const settings = data.settings;
       settings.apiToken = '';
 

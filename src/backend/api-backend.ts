@@ -139,7 +139,7 @@ export class ApiBackend extends SyncBackend {
           // Ensure parent directory exists
           const dir = file.path.substring(0, file.path.lastIndexOf('/'));
           if (dir) {
-            try { await this.vault.adapter.mkdir(dir); } catch {}
+            try { await this.vault.adapter.mkdir(dir); } catch { /* directory may already exist */ }
           }
           await this.vault.adapter.write(file.path, remote.content);
           pulled++;
@@ -311,7 +311,7 @@ export class ApiBackend extends SyncBackend {
         try {
           const content = await this.vault.adapter.read(path);
           localMap.set(path, await this.gitBlobSha1(content));
-        } catch {}
+        } catch { /* skip files that can't be read */ }
       }
       this.log('Local files:', localMap.size);
 
@@ -446,7 +446,7 @@ export class ApiBackend extends SyncBackend {
 
             const dir = path.substring(0, path.lastIndexOf('/'));
             if (dir) {
-              try { await this.vault.adapter.mkdir(dir); } catch {}
+              try { await this.vault.adapter.mkdir(dir); } catch { /* directory may already exist */ }
             }
             await this.vault.adapter.write(path, remoteFile.content);
             // Store content hash (SHA-1)

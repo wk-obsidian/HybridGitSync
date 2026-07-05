@@ -130,7 +130,7 @@ export class ConflictResolver {
               currentSha = undefined; // Reset SHA to force re-fetch
               if (retries === 0) throw e;
               console.warn('[ConflictResolver] Retry due to conflict...');
-              await new Promise(r => setTimeout(r, 1000)); // Wait 1 second
+              await new Promise(r => window.setTimeout(r, 1000)); // Wait 1 second
             }
           }
           break;

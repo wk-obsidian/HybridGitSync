@@ -1,6 +1,6 @@
 import { Vault } from 'obsidian';
 
-const STATE_FILE = '.obsidian/plugins/hybrid-git-sync/.sync-state.json';
+const STATE_FILE_NAME = 'plugins/hybrid-git-sync/.sync-state.json';
 
 export interface SyncState {
   lastSyncTime: string;
@@ -16,8 +16,10 @@ export class SyncStateManager {
   private vault: Vault;
   private state: SyncState;
   private debug: boolean;
+  private stateFile: string;
 
   constructor(vault: Vault, debug: boolean = false) {
+    this.stateFile = `${vault.configDir}/${STATE_FILE_NAME}`;
     this.vault = vault;
     this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
     this.debug = debug;
@@ -34,7 +36,7 @@ export class SyncStateManager {
    */
   async load(): Promise<void> {
     try {
-      const content = await this.vault.adapter.read(STATE_FILE);
+      const content = await this.vault.adapter.read(this.stateFile);
       this.state = JSON.parse(content);
     } catch {
       // No state file yet, start fresh
@@ -49,7 +51,7 @@ export class SyncStateManager {
     this.state.lastSyncTime = new Date().toISOString();
     const content = JSON.stringify(this.state, null, 2);
     try {
-      await this.vault.adapter.write(STATE_FILE, content);
+      await this.vault.adapter.write(this.stateFile, content);
     } catch (error) {
       console.error('[SyncState] Failed to save state:', error);
     }

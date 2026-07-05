@@ -97,7 +97,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Sync on startup
     if (this.settings.syncOnStartup && this.network.isOnline()) {
-      setTimeout(() => this.performSync(), 5000);
+      window.setTimeout(() => this.performSync(), 5000);
     }
 
     this.log('Plugin loaded', `Platform: ${getPlatformName()}, Backend: ${this.getActiveBackendName()}`);
@@ -726,7 +726,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     let localContent = '';
     try {
       localContent = await this.app.vault.adapter.read(path);
-    } catch {}
+    } catch { /* file may not exist locally */ }
 
     // Get remote content
     const remoteFile = await (this.backend as ApiBackend).getFile(path);
