@@ -33,7 +33,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     await this.loadSettings();
 
     // Initialize i18n (auto-detect from Obsidian locale)
-    initI18n(this.app);
+    initI18n();
 
     // Initialize utilities
     this.logger = new Logger('HybridGitSync', this.settings.debug ? LogLevel.DEBUG : LogLevel.INFO);

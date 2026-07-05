@@ -1,6 +1,6 @@
 import en from './locales/en';
 import zh from './locales/zh';
-import { App } from 'obsidian';
+import { App, getLanguage } from 'obsidian';
 
 export type Locale = 'en' | 'zh';
 
@@ -16,39 +16,22 @@ export class I18n {
   private locale: Locale;
   private translations: Record<string, string>;
 
-  constructor(app?: App) {
-    this.locale = this.detectLocale(app);
+  constructor() {
+    this.locale = this.detectLocale();
     this.translations = locales[this.locale] || locales.en;
   }
 
   /**
    * Detect locale from Obsidian or system
    */
-  private detectLocale(app?: App): Locale {
-    if (app) {
-      // Try different ways to get Obsidian language
-      const appAny = app as Record<string, unknown>;
+  private detectLocale(): Locale {
+    // Use Obsidian's getLanguage() API
+    const obsidianLang = getLanguage();
+    console.log('[HybridGitSync] Obsidian language:', obsidianLang);
 
-      // Check for language property
-      const lang = appAny.language || appAny.locale;
-      console.log('[HybridGitSync] Detected language property:', lang);
-
-      if (lang && typeof lang === 'string') {
-        if (lang.startsWith('zh')) return 'zh';
-        if (lang.startsWith('en')) return 'en';
-      }
-
-      // Try to get from vault config
-      try {
-        const vault = appAny.vault as Record<string, unknown> | undefined;
-        const config = vault?.config as Record<string, unknown> | undefined;
-        if (config?.locale) {
-          console.log('[HybridGitSync] Vault config locale:', config.locale);
-          if (typeof config.locale === 'string' && config.locale.startsWith('zh')) return 'zh';
-        }
-      } catch {
-        // ignore
-      }
+    if (obsidianLang) {
+      if (obsidianLang.startsWith('zh')) return 'zh';
+      if (obsidianLang.startsWith('en')) return 'en';
     }
 
     // Fallback to system locale
@@ -96,10 +79,10 @@ export class I18n {
 let i18nInstance: I18n | null = null;
 
 /**
- * Initialize i18n with app instance (call once in plugin onload)
+ * Initialize i18n (call once in plugin onload)
  */
-export function initI18n(app: App): I18n {
-  i18nInstance = new I18n(app);
+export function initI18n(): I18n {
+  i18nInstance = new I18n();
   return i18nInstance;
 }
 
