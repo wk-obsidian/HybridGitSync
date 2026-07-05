@@ -14,7 +14,7 @@ import { NetworkStatus } from './utils/network';
 import { GitignoreRules } from './utils/gitignore';
 import { Logger, LogLevel } from './utils/logger';
 import { SettingsIO } from './utils/settings-io';
-import { getPlatformType, getPlatformName, isDesktop } from './utils/platform';
+import { getPlatformName } from './utils/platform';
 import { t, initI18n } from './i18n';
 
 export default class HybridGitSyncPlugin extends Plugin {
@@ -73,11 +73,11 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Only show history and changes icons in API mode
     if (this.backend instanceof ApiBackend) {
       this.addRibbonIcon('history', 'View History', () => {
-        this.showHistoryView();
+        void this.showHistoryView();
       });
 
       this.addRibbonIcon('git-branch', 'View Changes', () => {
-        this.showChangesView();
+        void this.showChangesView();
       });
     }
 
@@ -126,7 +126,6 @@ export default class HybridGitSyncPlugin extends Plugin {
   private async initBackend(): Promise<void> {
     this.backend?.dispose();
 
-    const platform = getPlatformType();
     // Determine backend mode
     let useBackend = this.settings.backend;
 
@@ -161,8 +160,8 @@ export default class HybridGitSyncPlugin extends Plugin {
     }
 
     // Save corrected branch if using API backend
-    if ('getBranch' in this.backend) {
-      const correctedBranch = (this.backend as any).getBranch();
+    if (this.backend instanceof ApiBackend) {
+      const correctedBranch = this.backend.getBranch();
       if (correctedBranch !== this.settings.branch) {
         this.settings.branch = correctedBranch;
         await this.saveSettings();
@@ -185,24 +184,9 @@ export default class HybridGitSyncPlugin extends Plugin {
    */
   private async isGitAvailable(): Promise<boolean> {
     try {
-      const { exec } = require('child_process');
-      // @ts-ignore - basePath is available on vault adapter
-      const vaultPath = (this.app.vault.adapter as any).basePath || '';
-
-      return new Promise((resolve) => {
-        // Check if git is installed
-        exec(`${this.settings.gitPath} --version`, (error: Error | null) => {
-          if (error) {
-            resolve(false);
-            return;
-          }
-
-          // Check if vault is a git repository
-          exec(`${this.settings.gitPath} rev-parse --is-inside-work-tree`, { cwd: vaultPath }, (err: Error | null) => {
-            resolve(!err);
-          });
-        });
-      });
+      // Create a temporary GitBackend to check availability
+      const tempBackend = new GitBackend(this.app.vault, this.settings.gitPath);
+      return await tempBackend.isAvailable();
     } catch {
       return false;
     }
@@ -558,31 +542,31 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.addCommand({
       id: 'view-history',
       name: 'View commit history',
-      callback: () => this.showHistoryView(),
+      callback: () => void this.showHistoryView(),
     });
 
     this.addCommand({
       id: 'view-changes',
       name: 'View changes',
-      callback: () => this.showChangesView(),
+      callback: () => void this.showChangesView(),
     });
 
     this.addCommand({
       id: 'diff-current-file',
       name: 'Diff current file',
-      callback: () => this.diffCurrentFile(),
+      callback: () => void this.diffCurrentFile(),
     });
 
     this.addCommand({
       id: 'restore-file',
       name: 'Restore file from remote',
-      callback: () => this.restoreCurrentFile(),
+      callback: () => void this.restoreCurrentFile(),
     });
 
     this.addCommand({
       id: 'switch-branch',
       name: 'Switch branch',
-      callback: () => this.switchBranch(),
+      callback: () => void this.switchBranch(),
     });
 
     this.addCommand({
@@ -600,13 +584,13 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.addCommand({
       id: 'import-settings',
       name: 'Import settings',
-      callback: () => this.importSettings(),
+      callback: () => void this.importSettings(),
     });
 
     this.addCommand({
       id: 'clear-sync-state',
       name: 'Clear sync state',
-      callback: () => this.clearSyncState(),
+      callback: () => void this.clearSyncState(),
     });
   }
 

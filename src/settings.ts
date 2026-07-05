@@ -65,7 +65,7 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: t('settings.title') });
+    new Setting(containerEl).setName(t('settings.title')).setHeading();
 
     // Platform info
     const infoEl = containerEl.createDiv('setting-item-info');
@@ -145,7 +145,7 @@ export class SettingsTab extends PluginSettingTab {
       .setDesc(t('settings.apiTokenDesc'))
       .addText(cb => {
         cb.inputEl.type = 'password';
-        cb.inputEl.style.width = '100%';
+        cb.inputEl.addClass('settings-full-width');
         cb
           .setPlaceholder('ghp_xxxx...')
           .setValue(this.plugin.settings.apiToken)
