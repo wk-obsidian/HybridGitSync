@@ -639,6 +639,30 @@ export class ApiBackend extends SyncBackend {
 
   // ===== File operations =====
 
+  /**
+   * Decode base64 to UTF-8 string
+   */
+  private decodeBase64(base64: string): string {
+    const binaryStr = atob(base64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return new TextDecoder('utf-8').decode(bytes);
+  }
+
+  /**
+   * Encode UTF-8 string to base64
+   */
+  private encodeBase64(str: string): string {
+    const bytes = new TextEncoder().encode(str);
+    let binaryStr = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binaryStr += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binaryStr);
+  }
+
   async getFile(path: string): Promise<{ content: string; sha: string } | null> {
     try {
       const data = await this.apiRequest('GET',
@@ -649,15 +673,10 @@ export class ApiBackend extends SyncBackend {
       let content: string;
       if (data.encoding === 'base64') {
         try {
-          content = decodeURIComponent(escape(atob(data.content)));
+          content = this.decodeBase64(data.content);
         } catch {
-          console.warn('[HybridGitSync] URI decode failed for:', path, '- trying fallback');
-          try {
-            content = atob(data.content);
-          } catch {
-            console.warn('[HybridGitSync] atob also failed for:', path, '- using raw content');
-            content = data.content;
-          }
+          console.warn('[HybridGitSync] Base64 decode failed for:', path, '- using raw content');
+          content = data.content;
         }
       } else {
         content = data.content;
@@ -674,7 +693,7 @@ export class ApiBackend extends SyncBackend {
   async putFile(path: string, content: string, sha?: string): Promise<string> {
     const body: Record<string, string> = {
       message: `sync: ${path}`,
-      content: btoa(unescape(encodeURIComponent(content))),
+      content: this.encodeBase64(content),
       branch: this.config.branch,
     };
     if (sha) body.sha = sha;
@@ -845,11 +864,7 @@ export class ApiBackend extends SyncBackend {
         `/repos/${this.config.repo}/contents/${path}?ref=${sha}`
       ) as FileContent;
       if (data.encoding === 'base64') {
-        try {
-          return decodeURIComponent(escape(atob(data.content)));
-        } catch {
-          return atob(data.content);
-        }
+        return this.decodeBase64(data.content);
       }
       return data.content;
     } catch (error) {
