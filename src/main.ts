@@ -181,14 +181,26 @@ export default class HybridGitSyncPlugin extends Plugin {
   }
 
   /**
-   * Check if git is available on the system
+   * Check if git is available and vault is a git repository
    */
   private async isGitAvailable(): Promise<boolean> {
     try {
       const { exec } = require('child_process');
+      // @ts-ignore - basePath is available on vault adapter
+      const vaultPath = (this.app.vault.adapter as any).basePath || '';
+
       return new Promise((resolve) => {
+        // Check if git is installed
         exec(`${this.settings.gitPath} --version`, (error: Error | null) => {
-          resolve(!error);
+          if (error) {
+            resolve(false);
+            return;
+          }
+
+          // Check if vault is a git repository
+          exec(`${this.settings.gitPath} rev-parse --is-inside-work-tree`, { cwd: vaultPath }, (err: Error | null) => {
+            resolve(!err);
+          });
         });
       });
     } catch {
