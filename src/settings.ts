@@ -90,7 +90,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderGeneralSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: t('settings.general') });
+    new Setting(el).setName(t('settings.general')).setHeading();
 
     new Setting(el)
       .setName(t('settings.language'))
@@ -107,7 +107,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderBackendSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: t('settings.backend') });
+    new Setting(el).setName(t('settings.backend')).setHeading();
 
     new Setting(el)
       .setName(t('settings.backendMode'))
@@ -124,7 +124,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderRemoteSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: t('settings.remote') });
+    new Setting(el).setName(t('settings.remote')).setHeading();
 
     new Setting(el)
       .setName(t('settings.remoteUrl'))
@@ -202,7 +202,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderAutoSyncSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: t('settings.autoSync') });
+    new Setting(el).setName(t('settings.autoSync')).setHeading();
 
     new Setting(el)
       .setName(t('settings.enableAutoSync'))
@@ -258,7 +258,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderBehaviorSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: t('settings.behavior') });
+    new Setting(el).setName(t('settings.behavior')).setHeading();
 
     new Setting(el)
       .setName(t('settings.commitMessage'))
@@ -295,7 +295,7 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderAdvancedSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: t('settings.advanced') });
+    new Setting(el).setName(t('settings.advanced')).setHeading();
 
     new Setting(el)
       .setName(t('settings.debugMode'))

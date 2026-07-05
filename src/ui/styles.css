@@ -244,3 +244,92 @@
   text-align: center;
   color: var(--text-muted);
 }
+
+/* Conflict Modal */
+.conflict-stats {
+  display: flex;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.conflict-diff {
+  max-height: 300px;
+  overflow: auto;
+  font-family: var(--font-monospace);
+  font-size: 12px;
+  padding: 8px;
+  background-color: var(--background-secondary);
+  border-radius: 4px;
+  margin-top: 8px;
+}
+
+.conflict-diff-line {
+  padding: 1px 4px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.conflict-diff-prefix {
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.conflict-diff-added {
+  color: var(--text-success);
+}
+
+.conflict-diff-removed {
+  color: var(--text-error);
+}
+
+.conflict-diff-modified {
+  color: var(--text-warning);
+}
+
+.conflict-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  justify-content: flex-end;
+}
+
+.conflict-btn {
+  padding: 6px 16px;
+  border-radius: 4px;
+  border: 1px solid var(--text-muted);
+  background-color: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.conflict-btn:hover {
+  background-color: var(--background-secondary);
+}
+
+.conflict-btn.btn-local {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
+.conflict-btn.btn-remote {
+  border-color: var(--text-warning);
+  color: var(--text-warning);
+}
+
+.conflict-btn.btn-both {
+  border-color: var(--text-muted);
+  color: var(--text-muted);
+}
+
+.conflict-btn.btn-skip {
+  border-color: var(--text-faint);
+  color: var(--text-faint);
+}
+
+.conflict-error {
+  color: var(--text-error);
+  margin-top: 8px;
+  font-size: 12px;
+}
