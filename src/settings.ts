@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
+import { t } from './i18n';
 
 export interface PluginSettings {
   // General
@@ -44,7 +45,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   apiProvider: 'github',
   apiToken: '',
   apiBaseUrl: '',
-  gitPath: 'git',
+  gitPath: '/usr/local/bin/git',
   autoSync: true,
   autoSyncInterval: 10,
   syncOnStartup: true,
@@ -68,11 +69,16 @@ export class SettingsTab extends PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
 
-    containerEl.createEl('h2', { text: 'Hybrid Git Sync Settings' });
+    containerEl.createEl('h2', { text: t('settings.title') });
 
     // Platform info
     const infoEl = containerEl.createDiv('setting-item-info');
-    infoEl.createEl('span', { text: `Current platform: ${this.plugin.getPlatformName()} | Backend: ${this.plugin.getActiveBackendName()}` });
+    infoEl.createEl('span', {
+      text: t('settings.platformInfo', {
+        platform: this.plugin.getPlatformName(),
+        backend: this.plugin.getActiveBackendName()
+      })
+    });
     containerEl.createEl('hr');
 
     this.renderGeneralSettings(containerEl);
@@ -84,15 +90,15 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderGeneralSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: 'General' });
+    el.createEl('h3', { text: t('settings.general') });
 
     new Setting(el)
-      .setName('Language')
-      .setDesc('UI language (requires restart)')
+      .setName(t('settings.language'))
+      .setDesc(t('settings.languageDesc'))
       .addDropdown(cb => cb
-        .addOption('auto', 'Auto (detect from system)')
-        .addOption('en', 'English')
-        .addOption('zh', '中文')
+        .addOption('auto', t('settings.languageAuto'))
+        .addOption('en', t('settings.languageEn'))
+        .addOption('zh', t('settings.languageZh'))
         .setValue(this.plugin.settings.language)
         .onChange(async (value) => {
           this.plugin.settings.language = value as PluginSettings['language'];
@@ -101,15 +107,15 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderBackendSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: 'Backend' });
+    el.createEl('h3', { text: t('settings.backend') });
 
     new Setting(el)
-      .setName('Backend mode')
-      .setDesc('Auto: desktop=git, mobile=api. Or force a specific backend.')
+      .setName(t('settings.backendMode'))
+      .setDesc(t('settings.backendModeDesc'))
       .addDropdown(cb => cb
-        .addOption('auto', 'Auto (recommended)')
-        .addOption('git', 'Git (desktop only)')
-        .addOption('api', 'API (mobile only)')
+        .addOption('auto', t('settings.backendAuto'))
+        .addOption('git', t('settings.backendGit'))
+        .addOption('api', t('settings.backendApi'))
         .setValue(this.plugin.settings.backend)
         .onChange(async (value) => {
           this.plugin.settings.backend = value as PluginSettings['backend'];
@@ -118,11 +124,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderRemoteSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: 'Remote Repository' });
+    el.createEl('h3', { text: t('settings.remote') });
 
     new Setting(el)
-      .setName('Remote URL / Repo')
-      .setDesc('Desktop: git remote URL. Mobile: "owner/repo" (e.g. "user/my-vault")')
+      .setName(t('settings.remoteUrl'))
+      .setDesc(t('settings.remoteUrlDesc'))
       .addText(cb => cb
         .setPlaceholder('owner/repo')
         .setValue(this.plugin.settings.remoteUrl)
@@ -132,8 +138,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('Branch')
-      .setDesc('Branch to sync')
+      .setName(t('settings.branch'))
+      .setDesc(t('settings.branchDesc'))
       .addText(cb => cb
         .setPlaceholder('main')
         .setValue(this.plugin.settings.branch)
@@ -142,10 +148,10 @@ export class SettingsTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    // API settings (shown on mobile or when api backend is forced)
+    // API settings
     new Setting(el)
-      .setName('API Provider')
-      .setDesc('Git hosting provider for API sync')
+      .setName(t('settings.apiProvider'))
+      .setDesc(t('settings.apiProviderDesc'))
       .addDropdown(cb => cb
         .addOption('github', 'GitHub')
         .addOption('gitlab', 'GitLab')
@@ -157,8 +163,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('API Token')
-      .setDesc('Personal Access Token for API authentication')
+      .setName(t('settings.apiToken'))
+      .setDesc(t('settings.apiTokenDesc'))
       .addText(cb => {
         cb.inputEl.type = 'password';
         cb.inputEl.style.width = '100%';
@@ -172,8 +178,8 @@ export class SettingsTab extends PluginSettingTab {
       });
 
     new Setting(el)
-      .setName('Custom API URL')
-      .setDesc('For self-hosted instances (leave empty for default)')
+      .setName(t('settings.customApiUrl'))
+      .setDesc(t('settings.customApiUrlDesc'))
       .addText(cb => cb
         .setPlaceholder('https://your-gitea.com/api/v1')
         .setValue(this.plugin.settings.apiBaseUrl)
@@ -184,8 +190,8 @@ export class SettingsTab extends PluginSettingTab {
 
     // Git settings (desktop)
     new Setting(el)
-      .setName('Git path')
-      .setDesc('Path to git executable (desktop only)')
+      .setName(t('settings.gitPath'))
+      .setDesc(t('settings.gitPathDesc'))
       .addText(cb => cb
         .setPlaceholder('git')
         .setValue(this.plugin.settings.gitPath)
@@ -196,11 +202,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderAutoSyncSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: 'Auto Sync' });
+    el.createEl('h3', { text: t('settings.autoSync') });
 
     new Setting(el)
-      .setName('Enable auto sync')
-      .setDesc('Automatically sync at regular intervals')
+      .setName(t('settings.enableAutoSync'))
+      .setDesc(t('settings.enableAutoSyncDesc'))
       .addToggle(cb => cb
         .setValue(this.plugin.settings.autoSync)
         .onChange(async (value) => {
@@ -209,8 +215,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('Sync interval')
-      .setDesc('Minutes between auto syncs')
+      .setName(t('settings.syncInterval'))
+      .setDesc(t('settings.syncIntervalDesc'))
       .addText(cb => cb
         .setPlaceholder('10')
         .setValue(String(this.plugin.settings.autoSyncInterval))
@@ -220,8 +226,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('Sync on startup')
-      .setDesc('Sync when Obsidian starts')
+      .setName(t('settings.syncOnStartup'))
+      .setDesc(t('settings.syncOnStartupDesc'))
       .addToggle(cb => cb
         .setValue(this.plugin.settings.syncOnStartup)
         .onChange(async (value) => {
@@ -230,8 +236,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('Sync on file change')
-      .setDesc('Trigger sync when files are modified')
+      .setName(t('settings.syncOnFileChange'))
+      .setDesc(t('settings.syncOnFileChangeDesc'))
       .addToggle(cb => cb
         .setValue(this.plugin.settings.syncOnFileChange)
         .onChange(async (value) => {
@@ -240,8 +246,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('File change debounce')
-      .setDesc('Seconds to wait after last change before syncing')
+      .setName(t('settings.fileChangeDebounce'))
+      .setDesc(t('settings.fileChangeDebounceDesc'))
       .addText(cb => cb
         .setPlaceholder('30')
         .setValue(String(this.plugin.settings.fileChangeDebounce))
@@ -252,11 +258,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderBehaviorSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: 'Behavior' });
+    el.createEl('h3', { text: t('settings.behavior') });
 
     new Setting(el)
-      .setName('Commit message')
-      .setDesc('Template for commit messages. {{date}} = current datetime')
+      .setName(t('settings.commitMessage'))
+      .setDesc(t('settings.commitMessageDesc'))
       .addText(cb => cb
         .setPlaceholder('vault backup: {{date}}')
         .setValue(this.plugin.settings.commitMessage)
@@ -266,11 +272,11 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('Pull strategy')
-      .setDesc('How to integrate remote changes')
+      .setName(t('settings.pullStrategy'))
+      .setDesc(t('settings.pullStrategyDesc'))
       .addDropdown(cb => cb
-        .addOption('rebase', 'Rebase (recommended)')
-        .addOption('merge', 'Merge')
+        .addOption('rebase', t('settings.pullStrategyRebase'))
+        .addOption('merge', t('settings.pullStrategyMerge'))
         .setValue(this.plugin.settings.pullStrategy)
         .onChange(async (value) => {
           this.plugin.settings.pullStrategy = value as 'merge' | 'rebase';
@@ -278,8 +284,8 @@ export class SettingsTab extends PluginSettingTab {
         }));
 
     new Setting(el)
-      .setName('Show notifications')
-      .setDesc('Show notice on sync success/failure')
+      .setName(t('settings.showNotifications'))
+      .setDesc(t('settings.showNotificationsDesc'))
       .addToggle(cb => cb
         .setValue(this.plugin.settings.showNotice)
         .onChange(async (value) => {
@@ -289,11 +295,11 @@ export class SettingsTab extends PluginSettingTab {
   }
 
   private renderAdvancedSettings(el: HTMLElement): void {
-    el.createEl('h3', { text: 'Advanced' });
+    el.createEl('h3', { text: t('settings.advanced') });
 
     new Setting(el)
-      .setName('Debug mode')
-      .setDesc('Enable verbose logging in developer console')
+      .setName(t('settings.debugMode'))
+      .setDesc(t('settings.debugModeDesc'))
       .addToggle(cb => cb
         .setValue(this.plugin.settings.debug)
         .onChange(async (value) => {
