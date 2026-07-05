@@ -22,6 +22,52 @@ interface FileEntry {
   type: 'file' | 'dir';
 }
 
+interface RepoInfo {
+  default_branch: string;
+}
+
+interface GitTreeItem {
+  path: string;
+  sha: string;
+  type: 'blob' | 'tree';
+}
+
+interface GitTreeResponse {
+  tree: GitTreeItem[];
+}
+
+interface GitRef {
+  object: { sha: string };
+}
+
+interface CommitInfo {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  files: string[];
+}
+
+interface CommitDetail extends CommitInfo {
+  files: Array<{
+    path: string;
+    status: string;
+    additions: number;
+    deletions: number;
+  }>;
+}
+
+interface FileContent {
+  type: string;
+  encoding: string;
+  content: string;
+  sha: string;
+}
+
+interface PutFileResponse {
+  content: { sha: string };
+}
+
 export class ApiBackend extends SyncBackend {
   readonly name: string;
   private config: ApiConfig;
@@ -48,7 +94,7 @@ export class ApiBackend extends SyncBackend {
     });
   }
 
-  private log(...args: any[]): void {
+  private log(...args: unknown[]): void {
     if (this.debug) {
       console.log('[HybridGitSync]', ...args);
     }
@@ -56,7 +102,7 @@ export class ApiBackend extends SyncBackend {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`);
+      const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
       // Auto-detect default branch if not specified or invalid
       if (repoInfo.default_branch && this.config.branch !== repoInfo.default_branch) {
         console.log(`[HybridGitSync] Auto-correcting branch: ${this.config.branch} → ${repoInfo.default_branch}`);
@@ -597,20 +643,18 @@ export class ApiBackend extends SyncBackend {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${this.config.branch}`
-      );
+      ) as FileContent;
       if (data.type !== 'file') return null;
 
       let content: string;
       if (data.encoding === 'base64') {
         try {
           content = decodeURIComponent(escape(atob(data.content)));
-        } catch (e) {
+        } catch {
           console.warn('[HybridGitSync] URI decode failed for:', path, '- trying fallback');
-          // Fallback: try direct atob without URI decoding
           try {
             content = atob(data.content);
           } catch {
-            // If still fails, use raw content
             console.warn('[HybridGitSync] atob also failed for:', path, '- using raw content');
             content = data.content;
           }
@@ -620,14 +664,15 @@ export class ApiBackend extends SyncBackend {
       }
 
       return { content, sha: data.sha };
-    } catch (error: any) {
-      if (error.message?.includes('404')) return null;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('404')) return null;
       throw error;
     }
   }
 
   async putFile(path: string, content: string, sha?: string): Promise<string> {
-    const body: any = {
+    const body: Record<string, string> = {
       message: `sync: ${path}`,
       content: btoa(unescape(encodeURIComponent(content))),
       branch: this.config.branch,
@@ -636,7 +681,7 @@ export class ApiBackend extends SyncBackend {
 
     const data = await this.apiRequest('PUT',
       `/repos/${this.config.repo}/contents/${path}`, body
-    );
+    ) as PutFileResponse;
     return data.content.sha;
   }
 
@@ -654,13 +699,13 @@ export class ApiBackend extends SyncBackend {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${this.config.branch}`
-      );
+      ) as Array<Record<string, unknown>>;
       if (!Array.isArray(data)) return [];
-      return data.map((item: any) => ({
-        name: item.name,
-        path: item.path,
-        sha: item.sha,
-        size: item.size,
+      return data.map((item) => ({
+        name: item.name as string,
+        path: item.path as string,
+        sha: item.sha as string,
+        size: item.size as number,
         type: item.type as 'file' | 'dir',
       }));
     } catch {
@@ -688,22 +733,20 @@ export class ApiBackend extends SyncBackend {
    * This is much more efficient than fetching each file individually
    */
   async getRemoteTree(): Promise<Map<string, string>> {
-    const fileMap = new Map<string, string>(); // path -> sha
+    const fileMap = new Map<string, string>();
 
-    // Get the tree SHA for the branch
     const branchInfo = await this.apiRequest('GET',
       `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
-    );
+    ) as GitRef;
     const treeSha = branchInfo.object.sha;
 
-    // Get the entire tree recursively
     const tree = await this.apiRequest('GET',
       `/repos/${this.config.repo}/git/trees/${treeSha}?recursive=1`
-    );
+    ) as GitTreeResponse;
 
     if (tree.tree) {
       for (const item of tree.tree) {
-        if (item.type === 'blob') { // Only files, not directories
+        if (item.type === 'blob') {
           fileMap.set(item.path, item.sha);
         }
       }
@@ -717,18 +760,22 @@ export class ApiBackend extends SyncBackend {
   /**
    * Get commit history
    */
-  async getCommitHistory(limit: number = 50): Promise<any[]> {
+  async getCommitHistory(limit: number = 50): Promise<CommitInfo[]> {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/commits?sha=${this.config.branch}&per_page=${limit}`
-      );
-      return data.map((commit: any) => ({
-        sha: commit.sha,
-        message: commit.commit.message.split('\n')[0], // First line only
-        author: commit.commit.author.name,
-        date: commit.commit.author.date,
-        files: [], // Would need additional API call to get files
-      }));
+      ) as Array<Record<string, unknown>>;
+      return data.map((commit) => {
+        const commitData = commit.commit as Record<string, unknown>;
+        const author = commitData.author as Record<string, string>;
+        return {
+          sha: commit.sha as string,
+          message: (commitData.message as string).split('\n')[0],
+          author: author.name,
+          date: author.date,
+          files: [],
+        };
+      });
     } catch (error) {
       console.error('[HybridGitSync] Failed to get commit history:', error);
       return [];
@@ -738,22 +785,25 @@ export class ApiBackend extends SyncBackend {
   /**
    * Get commit details with changed files
    */
-  async getCommitDetails(sha: string): Promise<any> {
+  async getCommitDetails(sha: string): Promise<CommitDetail | null> {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/commits/${sha}`
-      );
+      ) as Record<string, unknown>;
+      const commitData = data.commit as Record<string, unknown>;
+      const author = commitData.author as Record<string, string>;
+      const files = (data.files as Array<Record<string, unknown>>) || [];
       return {
-        sha: data.sha,
-        message: data.commit.message,
-        author: data.commit.author.name,
-        date: data.commit.author.date,
-        files: data.files?.map((f: any) => ({
-          path: f.filename,
-          status: f.status,
-          additions: f.additions,
-          deletions: f.deletions,
-        })) || [],
+        sha: data.sha as string,
+        message: commitData.message as string,
+        author: author.name,
+        date: author.date,
+        files: files.map((f) => ({
+          path: f.filename as string,
+          status: f.status as string,
+          additions: f.additions as number,
+          deletions: f.deletions as number,
+        })),
       };
     } catch (error) {
       console.error('[HybridGitSync] Failed to get commit details:', error);
@@ -764,17 +814,22 @@ export class ApiBackend extends SyncBackend {
   /**
    * Get file history
    */
-  async getFileHistory(path: string, limit: number = 20): Promise<any[]> {
+  async getFileHistory(path: string, limit: number = 20): Promise<CommitInfo[]> {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/commits?sha=${this.config.branch}&path=${path}&per_page=${limit}`
-      );
-      return data.map((commit: any) => ({
-        sha: commit.sha,
-        message: commit.commit.message.split('\n')[0],
-        author: commit.commit.author.name,
-        date: commit.commit.author.date,
-      }));
+      ) as Array<Record<string, unknown>>;
+      return data.map((commit) => {
+        const commitData = commit.commit as Record<string, unknown>;
+        const author = commitData.author as Record<string, string>;
+        return {
+          sha: commit.sha as string,
+          message: (commitData.message as string).split('\n')[0],
+          author: author.name,
+          date: author.date,
+          files: [],
+        };
+      });
     } catch (error) {
       console.error('[HybridGitSync] Failed to get file history:', error);
       return [];
@@ -788,7 +843,7 @@ export class ApiBackend extends SyncBackend {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${sha}`
-      );
+      ) as FileContent;
       if (data.encoding === 'base64') {
         try {
           return decodeURIComponent(escape(atob(data.content)));
@@ -810,8 +865,8 @@ export class ApiBackend extends SyncBackend {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/branches`
-      );
-      return data.map((branch: any) => branch.name);
+      ) as Array<Record<string, string>>;
+      return data.map((branch) => branch.name);
     } catch (error) {
       console.error('[HybridGitSync] Failed to get branches:', error);
       return [];
@@ -918,15 +973,10 @@ export class ApiBackend extends SyncBackend {
   private async apiRequest(
     method: string,
     path: string,
-    body?: any
-  ): Promise<any> {
-    // Split path and query string
+    body?: Record<string, string>
+  ): Promise<unknown> {
     const [pathPart, queryPart] = path.split('?');
-
-    // URL-encode only the path segments to handle special characters (Chinese, spaces, etc.)
     const encodedPath = pathPart.split('/').map(segment => encodeURIComponent(segment)).join('/');
-
-    // Reconstruct URL with query string (if any)
     const url = queryPart
       ? `${this.baseUrl}${encodedPath}?${queryPart}`
       : `${this.baseUrl}${encodedPath}`;
