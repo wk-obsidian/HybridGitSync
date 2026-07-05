@@ -15,7 +15,7 @@ import { GitignoreRules } from './utils/gitignore';
 import { Logger, LogLevel } from './utils/logger';
 import { SettingsIO } from './utils/settings-io';
 import { getPlatformType, getPlatformName, isDesktop } from './utils/platform';
-import { t, I18n } from './i18n';
+import { t, initI18n } from './i18n';
 
 export default class HybridGitSyncPlugin extends Plugin {
   settings!: PluginSettings;
@@ -26,7 +26,6 @@ export default class HybridGitSyncPlugin extends Plugin {
   gitignore!: GitignoreRules;
   logger!: Logger;
   settingsIO!: SettingsIO;
-  i18n!: I18n;
   private autoSyncInterval: number | null = null;
   private isResolvingConflicts = false;
 
@@ -34,7 +33,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     await this.loadSettings();
 
     // Initialize i18n (auto-detect from Obsidian locale)
-    this.i18n = new I18n(this.app);
+    initI18n(this.app);
 
     // Initialize utilities
     this.logger = new Logger('HybridGitSync', this.settings.debug ? LogLevel.DEBUG : LogLevel.INFO);

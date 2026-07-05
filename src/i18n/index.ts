@@ -77,8 +77,20 @@ export class I18n {
 // Singleton instance
 let i18nInstance: I18n | null = null;
 
+/**
+ * Initialize i18n with app instance (call once in plugin onload)
+ */
+export function initI18n(app: App): I18n {
+  i18nInstance = new I18n(app);
+  return i18nInstance;
+}
+
+/**
+ * Get i18n instance (must call initI18n first)
+ */
 export function getI18n(): I18n {
   if (!i18nInstance) {
+    // Fallback: create without app (for non-plugin contexts)
     i18nInstance = new I18n();
   }
   return i18nInstance;
