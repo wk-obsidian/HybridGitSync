@@ -1,7 +1,6 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
-import { t } from '../i18n';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'skip';
 

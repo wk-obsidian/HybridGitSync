@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile,setIcon } from 'obsidian';
+import { ItemView, WorkspaceLeaf } from 'obsidian';
 
 export const CHANGES_VIEW_TYPE = 'hybrid-git-sync-changes';
 

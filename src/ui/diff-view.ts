@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, moment } from 'obsidian';
+import { ItemView, WorkspaceLeaf } from 'obsidian';
 
 export const DIFF_VIEW_TYPE = 'hybrid-git-sync-diff';
 

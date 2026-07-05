@@ -1,4 +1,3 @@
-import { ItemView, WorkspaceLeaf } from 'obsidian';
 import { t } from '../i18n';
 
 export type SyncState = 'idle' | 'syncing' | 'error' | 'conflict' | 'offline';

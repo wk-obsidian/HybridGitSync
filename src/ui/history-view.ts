@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, TFile, moment } from 'obsidian';
+import { ItemView, WorkspaceLeaf, moment } from 'obsidian';
 
 export const HISTORY_VIEW_TYPE = 'hybrid-git-sync-history';
 
