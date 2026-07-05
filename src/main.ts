@@ -89,7 +89,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.network.onChange(online => {
       if (online) {
         this.log('Network restored, triggering sync');
-        this.performSync();
+        void this.performSync();
       } else {
         this.statusBar.setState('offline');
       }
@@ -370,7 +370,7 @@ export default class HybridGitSyncPlugin extends Plugin {
         // All conflicts resolved
         this.isResolvingConflicts = false;
         this.showNotice('All conflicts resolved');
-        this.performSync();
+        void this.performSync();
         return;
       }
 
@@ -397,7 +397,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       const intervalMs = this.settings.autoSyncInterval * 60 * 1000;
       this.autoSyncInterval = window.setInterval(() => {
         if (this.network.isOnline()) {
-          this.performSync();
+          void this.performSync();
         }
       }, intervalMs);
       this.registerInterval(this.autoSyncInterval);
@@ -444,7 +444,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private onFileChange(): void {
     if (!this.network.isOnline()) return;
-    this.syncQueue.enqueue(() => this.performSync());
+    this.syncQueue.enqueue(() => void this.performSync());
   }
 
   // ===== Commands =====
@@ -453,7 +453,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.addCommand({
       id: 'sync-now',
       name: 'Sync now',
-      callback: () => this.performSync(),
+      callback: () => void this.performSync(),
     });
 
     this.addCommand({
