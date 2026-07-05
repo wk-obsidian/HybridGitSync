@@ -1,7 +1,7 @@
 {
   "id": "hybrid-git-sync",
   "name": "Hybrid Git Sync",
-  "version": "0.1.0",
+  "version": "1.0.1",
   "minAppVersion": "0.15.0",
   "description": "Cross-platform Git sync plugin. Desktop uses native git, mobile uses GitHub/GitLab API.",
   "author": "walkskyer",
