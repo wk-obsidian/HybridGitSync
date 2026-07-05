@@ -1,5 +1,6 @@
 import { Notice, Plugin } from 'obsidian';
 import { PluginSettings, SettingsTab, DEFAULT_SETTINGS } from './settings';
+import { getErrorMessage } from './utils/error';
 import { SyncBackend } from './backend/base';
 import { GitBackend } from './backend/git-backend';
 import { ApiBackend, ApiProvider } from './backend/api-backend';
@@ -291,8 +292,8 @@ export default class HybridGitSyncPlugin extends Plugin {
           this.log('Sync failed', result.message);
         }
       } catch (error) {
-        this.statusBar.setState('error', (error as Error).message);
-        this.showNotice(`Sync error: ${(error as Error).message}`);
+        this.statusBar.setState('error', getErrorMessage(error));
+        this.showNotice(`Sync error: ${getErrorMessage(error)}`);
         this.log('Sync error', error);
       }
     });

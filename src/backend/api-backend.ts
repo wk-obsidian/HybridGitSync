@@ -3,6 +3,7 @@ import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 import { SyncStateManager } from '../sync/state';
 import { GitignoreRules } from '../utils/gitignore';
 import { t } from '../i18n';
+import { getErrorMessage, toError } from '../utils/error';
 
 export type ApiProvider = 'github' | 'gitlab' | 'gitea';
 
@@ -154,8 +155,8 @@ export class ApiBackend extends SyncBackend {
     } catch (error) {
       return {
         success: false,
-        message: `Pull failed: ${(error as Error).message}`,
-        error: error as Error,
+        message: `Pull failed: ${getErrorMessage(error)}`,
+        error: toError(error),
       };
     }
   }
@@ -232,8 +233,8 @@ export class ApiBackend extends SyncBackend {
     } catch (error) {
       return {
         success: false,
-        message: `Push failed: ${(error as Error).message}`,
-        error: error as Error,
+        message: `Push failed: ${getErrorMessage(error)}`,
+        error: toError(error),
       };
     }
   }
@@ -256,11 +257,11 @@ export class ApiBackend extends SyncBackend {
         this.log('Remote files:', remoteMap.size);
       } catch (error) {
         // Network error - cannot reach remote
-        console.warn('[HybridGitSync] Cannot reach remote, skipping sync:', (error as Error).message);
+        console.warn('[HybridGitSync] Cannot reach remote, skipping sync:', getErrorMessage(error));
         return {
           success: false,
           message: 'Cannot reach remote. Check network connection.',
-          error: error as Error,
+          error: toError(error),
         };
       }
 
@@ -563,8 +564,8 @@ export class ApiBackend extends SyncBackend {
     } catch (error) {
       return {
         success: false,
-        message: t('sync.failed', { message: (error as Error).message }),
-        error: error as Error,
+        message: t('sync.failed', { message: getErrorMessage(error) }),
+        error: toError(error),
       };
     }
   }

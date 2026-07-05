@@ -2,6 +2,7 @@ import { exec } from 'child_process';
 import { Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 import { t } from '../i18n';
+import { getErrorMessage, toError } from '../utils/error';
 
 export class GitBackend extends SyncBackend {
   readonly name = 'git';
@@ -64,7 +65,7 @@ export class GitBackend extends SyncBackend {
       return {
         success: false,
         message: 'Pull failed',
-        error: error as Error,
+        error: toError(error),
       };
     }
   }
@@ -94,8 +95,8 @@ export class GitBackend extends SyncBackend {
     } catch (error) {
       return {
         success: false,
-        message: `Push failed: ${(error as Error).message}`,
-        error: error as Error,
+        message: `Push failed: ${getErrorMessage(error)}`,
+        error: toError(error),
       };
     }
   }
@@ -144,8 +145,8 @@ export class GitBackend extends SyncBackend {
     } catch (error) {
       return {
         success: false,
-        message: `Sync failed: ${(error as Error).message}`,
-        error: error as Error,
+        message: `Sync failed: ${getErrorMessage(error)}`,
+        error: toError(error),
       };
     }
   }
@@ -186,7 +187,7 @@ export class GitBackend extends SyncBackend {
       // If git status fails, might be in a bad state
       return {
         ok: false,
-        message: `Git state check failed: ${(error as Error).message}`,
+        message: `Git state check failed: ${getErrorMessage(error)}`,
       };
     }
   }

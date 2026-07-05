@@ -1,6 +1,7 @@
 import { App, Modal } from 'obsidian';
 import { ConflictInfo, ConflictResolution, DiffResult } from '../sync/conflict';
 import { t } from '../i18n';
+import { getErrorMessage } from '../utils/error';
 
 /**
  * Modal for resolving file conflicts
@@ -82,7 +83,7 @@ export class ConflictModal extends Modal {
         btn.setText(text);
         // Show error message in the modal
         const errorEl = this.contentEl.createDiv('conflict-error');
-        errorEl.setText(`Error: ${(error as Error).message}`);
+        errorEl.setText(`Error: ${getErrorMessage(error)}`);
         // Auto-remove after 5 seconds
         window.setTimeout(() => errorEl.remove(), 5000);
       }
