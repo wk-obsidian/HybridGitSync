@@ -104,7 +104,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   onunload(): void {
     this.stopAutoSync();
-    this.syncQueue.clear();
+    this.syncQueue?.clear();
     this.backend?.dispose();
     this.log('Plugin unloaded');
   }

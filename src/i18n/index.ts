@@ -25,17 +25,35 @@ export class I18n {
    * Detect locale from Obsidian or system
    */
   private detectLocale(app?: App): Locale {
-    // Try to get locale from Obsidian app instance
     if (app) {
-      // @ts-ignore - locale is available on Obsidian App
-      const obsidianLocale: string | undefined = app.locale;
-      if (obsidianLocale) {
-        if (obsidianLocale.startsWith('zh')) return 'zh';
+      // Try different ways to get Obsidian language
+      const appAny = app as Record<string, unknown>;
+
+      // Check for language property
+      const lang = appAny.language || appAny.locale;
+      console.log('[HybridGitSync] Detected language property:', lang);
+
+      if (lang && typeof lang === 'string') {
+        if (lang.startsWith('zh')) return 'zh';
+        if (lang.startsWith('en')) return 'en';
+      }
+
+      // Try to get from vault config
+      try {
+        const vault = appAny.vault as Record<string, unknown> | undefined;
+        const config = vault?.config as Record<string, unknown> | undefined;
+        if (config?.locale) {
+          console.log('[HybridGitSync] Vault config locale:', config.locale);
+          if (typeof config.locale === 'string' && config.locale.startsWith('zh')) return 'zh';
+        }
+      } catch {
+        // ignore
       }
     }
 
-    // Try to get locale from system
+    // Fallback to system locale
     const systemLocale = navigator.language;
+    console.log('[HybridGitSync] System locale (fallback):', systemLocale);
     if (systemLocale.startsWith('zh')) return 'zh';
 
     return 'en';
