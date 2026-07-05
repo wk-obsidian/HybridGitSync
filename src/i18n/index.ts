@@ -1,5 +1,6 @@
 import en from './locales/en';
 import zh from './locales/zh';
+import { App } from 'obsidian';
 
 export type Locale = 'en' | 'zh';
 
@@ -15,19 +16,22 @@ export class I18n {
   private locale: Locale;
   private translations: Record<string, string>;
 
-  constructor(locale?: Locale) {
-    this.locale = locale || this.detectLocale();
+  constructor(app?: App) {
+    this.locale = this.detectLocale(app);
     this.translations = locales[this.locale] || locales.en;
   }
 
   /**
    * Detect locale from Obsidian or system
    */
-  private detectLocale(): Locale {
-    // Try to get locale from Obsidian
-    const obsidianLocale = (window as any).app?.locale;
-    if (obsidianLocale) {
-      if (obsidianLocale.startsWith('zh')) return 'zh';
+  private detectLocale(app?: App): Locale {
+    // Try to get locale from Obsidian app instance
+    if (app) {
+      // @ts-ignore - locale is available on Obsidian App
+      const obsidianLocale: string | undefined = app.locale;
+      if (obsidianLocale) {
+        if (obsidianLocale.startsWith('zh')) return 'zh';
+      }
     }
 
     // Try to get locale from system
