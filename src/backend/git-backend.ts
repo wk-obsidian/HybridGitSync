@@ -215,7 +215,7 @@ export class GitBackend extends SyncBackend {
       const hasConflicts = statusOutput.includes('UU') || statusOutput.includes('AA');
 
       return { ahead, behind, changedFiles, branch, hasConflicts };
-    } catch (error) {
+    } catch {
       return {
         ahead: 0,
         behind: 0,
