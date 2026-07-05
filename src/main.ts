@@ -127,12 +127,19 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.backend?.dispose();
 
     const platform = getPlatformType();
-    const useBackend = this.settings.backend === 'auto'
-      ? (platform === 'desktop' ? 'git' : 'api')
-      : this.settings.backend;
+    // Determine backend mode
+    let useBackend = this.settings.backend;
+
+    if (useBackend === 'auto') {
+      // Auto mode: check if git is available
+      useBackend = await this.isGitAvailable() ? 'git' : 'api';
+      this.log('Auto mode: using', useBackend, 'backend');
+    }
 
     if (useBackend === 'git') {
-      if (!isDesktop()) {
+      // Verify git is actually available
+      const gitAvailable = await this.isGitAvailable();
+      if (!gitAvailable) {
         this.showNotice(t('notice.gitNotAvailable'));
         this.backend = this.createApiBackend();
       } else {
@@ -171,6 +178,22 @@ export default class HybridGitSyncPlugin extends Plugin {
       branch: this.settings.branch,
       baseUrl: this.settings.apiBaseUrl || undefined,
     }, this.gitignore, this.settings.debug);
+  }
+
+  /**
+   * Check if git is available on the system
+   */
+  private async isGitAvailable(): Promise<boolean> {
+    try {
+      const { exec } = require('child_process');
+      return new Promise((resolve) => {
+        exec(`${this.settings.gitPath} --version`, (error: Error | null) => {
+          resolve(!error);
+        });
+      });
+    } catch {
+      return false;
+    }
   }
 
   // ===== Gitignore =====
