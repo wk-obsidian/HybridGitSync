@@ -340,7 +340,7 @@ export default class HybridGitSyncPlugin extends Plugin {
             });
           }
         }
-      } catch (e) {
+      } catch {
         // Ignore errors
       }
     }
@@ -581,7 +581,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private showLogs(): void {
     const logs = this.logger.getLogsAsString();
-    const notice = new Notice(t('notice.logsCopied'), 5000);
+    new Notice(t('notice.logsCopied'), 5000);
     navigator.clipboard.writeText(logs);
   }
 
@@ -654,7 +654,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Show branch selection
     const currentBranch = (this.backend as ApiBackend).getBranch();
-    const notice = new Notice(`Branches:\n${branches.map(b =>
+    new Notice(`Branches:\n${branches.map(b =>
       `${b === currentBranch ? '● ' : '  '}${b}`
     ).join('\n')}\n\nCurrent: ${currentBranch}`, 10000);
   }
