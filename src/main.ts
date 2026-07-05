@@ -240,43 +240,42 @@ export default class HybridGitSyncPlugin extends Plugin {
     }
 
     // Use sync queue with debouncing
-    const self = this;
     this.syncQueue.enqueue(async () => {
-      self.log('Sync queue callback executing', {
-        hasBackend: !!self.backend,
-        backendType: self.backend?.constructor?.name,
+      this.log('Sync queue callback executing', {
+        hasBackend: !!this.backend,
+        backendType: this.backend?.constructor?.name,
       });
-      self.statusBar.setState('syncing');
-      self.log('Starting sync...');
+      this.statusBar.setState('syncing');
+      this.log('Starting sync...');
 
       try {
         // If using API backend, check for conflicts first
-        if (self.backend instanceof ApiBackend) {
-          const conflicts = await self.checkConflicts();
+        if (this.backend instanceof ApiBackend) {
+          const conflicts = await this.checkConflicts();
           if (conflicts.length > 0) {
-            self.statusBar.setState('conflict');
-            await self.handleConflicts(conflicts);
+            this.statusBar.setState('conflict');
+            await this.handleConflicts(conflicts);
             return;
           }
         }
 
-        const result = await self.backend.sync();
+        const result = await this.backend.sync();
 
         if (result.success) {
-          self.statusBar.setState('idle');
-          self.log('Sync completed', result.message);
-          if (self.settings.showNotice) {
-            self.showNotice(result.message || 'Sync completed');
+          this.statusBar.setState('idle');
+          this.log('Sync completed', result.message);
+          if (this.settings.showNotice) {
+            this.showNotice(result.message || 'Sync completed');
           }
         } else {
-          self.statusBar.setState('error', result.message);
-          self.showNotice(`Sync failed: ${result.message}`);
-          self.log('Sync failed', result.message);
+          this.statusBar.setState('error', result.message);
+          this.showNotice(`Sync failed: ${result.message}`);
+          this.log('Sync failed', result.message);
         }
       } catch (error) {
-        self.statusBar.setState('error', (error as Error).message);
-        self.showNotice(`Sync error: ${(error as Error).message}`);
-        self.log('Sync error', error);
+        this.statusBar.setState('error', (error as Error).message);
+        this.showNotice(`Sync error: ${(error as Error).message}`);
+        this.log('Sync error', error);
       }
     });
   }
