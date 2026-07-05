@@ -3,9 +3,6 @@ import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
 
 export interface PluginSettings {
-  // General
-  language: 'auto' | 'en' | 'zh';  // UI language
-
   // Backend
   backend: 'auto' | 'git' | 'api';
 
@@ -38,7 +35,6 @@ export interface PluginSettings {
 }
 
 export const DEFAULT_SETTINGS: PluginSettings = {
-  language: 'auto',
   backend: 'auto',
   remoteUrl: '',
   branch: 'main',
@@ -81,29 +77,11 @@ export class SettingsTab extends PluginSettingTab {
     });
     containerEl.createEl('hr');
 
-    this.renderGeneralSettings(containerEl);
     this.renderBackendSettings(containerEl);
     this.renderRemoteSettings(containerEl);
     this.renderAutoSyncSettings(containerEl);
     this.renderBehaviorSettings(containerEl);
     this.renderAdvancedSettings(containerEl);
-  }
-
-  private renderGeneralSettings(el: HTMLElement): void {
-    new Setting(el).setName(t('settings.general')).setHeading();
-
-    new Setting(el)
-      .setName(t('settings.language'))
-      .setDesc(t('settings.languageDesc'))
-      .addDropdown(cb => cb
-        .addOption('auto', t('settings.languageAuto'))
-        .addOption('en', t('settings.languageEn'))
-        .addOption('zh', t('settings.languageZh'))
-        .setValue(this.plugin.settings.language)
-        .onChange(async (value) => {
-          this.plugin.settings.language = value as PluginSettings['language'];
-          await this.plugin.saveSettings();
-        }));
   }
 
   private renderBackendSettings(el: HTMLElement): void {

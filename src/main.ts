@@ -33,8 +33,8 @@ export default class HybridGitSyncPlugin extends Plugin {
   async onload(): Promise<void> {
     await this.loadSettings();
 
-    // Initialize i18n
-    this.i18n = new I18n(this.settings.language === 'auto' ? undefined : this.settings.language);
+    // Initialize i18n (auto-detect from Obsidian locale)
+    this.i18n = new I18n();
 
     // Initialize utilities
     this.logger = new Logger('HybridGitSync', this.settings.debug ? LogLevel.DEBUG : LogLevel.INFO);
@@ -116,10 +116,6 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
-    // Update i18n language
-    if (this.settings.language !== 'auto') {
-      this.i18n.setLocale(this.settings.language);
-    }
     // Re-init backend when settings change
     await this.initBackend();
     // Update sync queue debounce
