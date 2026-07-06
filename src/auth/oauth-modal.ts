@@ -26,9 +26,22 @@ export class OAuthModal extends Modal {
     // Instructions
     contentEl.createEl('p', { text: t('oauth.step1') });
 
-    // Code display (large, easy to read)
+    // Code display (large, easy to read, selectable)
     const codeEl = contentEl.createDiv('oauth-code');
-    codeEl.createEl('span', { text: this.userCode });
+    const codeSpan = codeEl.createEl('span', { text: this.userCode });
+    codeSpan.style.userSelect = 'all';
+    codeSpan.style.cursor = 'text';
+
+    // Copy button
+    const copyRow = contentEl.createDiv();
+    copyRow.style.textAlign = 'center';
+    copyRow.style.marginTop = '8px';
+    const copyBtn = copyRow.createEl('button', { text: t('oauth.copyCode') });
+    copyBtn.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(this.userCode);
+      copyBtn.setText(t('oauth.copied'));
+      window.setTimeout(() => copyBtn.setText(t('oauth.copyCode')), 2000);
+    });
 
     // URL
     contentEl.createEl('p', { text: t('oauth.step2') });

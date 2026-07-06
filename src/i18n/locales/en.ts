@@ -186,6 +186,8 @@ export default {
   'oauth.step1': 'Step 1: Copy this code:',
   'oauth.step2': 'Step 2: Visit this URL and enter the code:',
   'oauth.openBrowser': 'Open Browser',
+  'oauth.copyCode': 'Copy Code',
+  'oauth.copied': 'Copied!',
   'oauth.cancel': 'Cancel',
   'oauth.expiresIn': 'Expires in {time}',
 };

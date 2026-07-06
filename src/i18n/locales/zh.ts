@@ -186,6 +186,8 @@ export default {
   'oauth.step1': '第一步：复制此代码：',
   'oauth.step2': '第二步：访问此网址并输入代码：',
   'oauth.openBrowser': '打开浏览器',
+  'oauth.copyCode': '复制代码',
+  'oauth.copied': '已复制！',
   'oauth.cancel': '取消',
   'oauth.expiresIn': '剩余时间 {time}',
 };
