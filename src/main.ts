@@ -467,6 +467,56 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   // ===== Commands =====
 
+  private async pullCommand(): Promise<void> {
+    if (!this.network.isOnline()) {
+      this.showNotice(t('notice.offline'));
+      return;
+    }
+    this.statusBar.setState('syncing');
+    const result = await this.backend.pull();
+    if (result.success) {
+      this.statusBar.setState('idle');
+      this.showNotice(t('notice.pullCompleted'));
+    } else {
+      this.statusBar.setState('error', result.message);
+      this.showNotice(t('notice.pullFailed', { message: result.message }));
+    }
+  }
+
+  private async pushCommand(): Promise<void> {
+    if (!this.network.isOnline()) {
+      this.showNotice(t('notice.offline'));
+      return;
+    }
+    this.statusBar.setState('syncing');
+    const result = await this.backend.push();
+    if (result.success) {
+      this.statusBar.setState('idle');
+      this.showNotice(t('notice.pushCompleted'));
+    } else {
+      this.statusBar.setState('error', result.message);
+      this.showNotice(t('notice.pushFailed', { message: result.message }));
+    }
+  }
+
+  private async viewStatusCommand(): Promise<void> {
+    const status = await this.backend.status();
+    const msg = [
+      `Branch: ${status.branch}`,
+      `Ahead: ${status.ahead}, Behind: ${status.behind}`,
+      `Changed files: ${status.changedFiles.length}`,
+      status.hasConflicts ? '⚠ Has conflicts' : 'No conflicts',
+      `Network: ${this.network.isOnline() ? 'Online' : 'Offline'}`,
+    ].join('\n');
+    this.showNotice(msg, 10000);
+  }
+
+  private async toggleAutoSyncCommand(): Promise<void> {
+    this.settings.autoSync = !this.settings.autoSync;
+    await this.saveSettings();
+    this.showNotice(t('notice.autoSyncToggled', { status: this.settings.autoSync ? t('notice.autoSyncEnabled') : t('notice.autoSyncDisabled') }));
+  }
+
   private registerCommands(): void {
     this.addCommand({
       id: 'sync-now',
@@ -477,67 +527,25 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.addCommand({
       id: 'pull',
       name: 'Pull',
-      callback: async () => {
-        if (!this.network.isOnline()) {
-          this.showNotice(t('notice.offline'));
-          return;
-        }
-        this.statusBar.setState('syncing');
-        const result = await this.backend.pull();
-        if (result.success) {
-          this.statusBar.setState('idle');
-          this.showNotice(t('notice.pullCompleted'));
-        } else {
-          this.statusBar.setState('error', result.message);
-          this.showNotice(t('notice.pullFailed', { message: result.message }));
-        }
-      },
+      callback: () => void this.pullCommand(),
     });
 
     this.addCommand({
       id: 'push',
       name: 'Push',
-      callback: async () => {
-        if (!this.network.isOnline()) {
-          this.showNotice(t('notice.offline'));
-          return;
-        }
-        this.statusBar.setState('syncing');
-        const result = await this.backend.push();
-        if (result.success) {
-          this.statusBar.setState('idle');
-          this.showNotice(t('notice.pushCompleted'));
-        } else {
-          this.statusBar.setState('error', result.message);
-          this.showNotice(t('notice.pushFailed', { message: result.message }));
-        }
-      },
+      callback: () => void this.pushCommand(),
     });
 
     this.addCommand({
       id: 'view-status',
       name: 'View sync status',
-      callback: async () => {
-        const status = await this.backend.status();
-        const msg = [
-          `Branch: ${status.branch}`,
-          `Ahead: ${status.ahead}, Behind: ${status.behind}`,
-          `Changed files: ${status.changedFiles.length}`,
-          status.hasConflicts ? '⚠ Has conflicts' : 'No conflicts',
-          `Network: ${this.network.isOnline() ? 'Online' : 'Offline'}`,
-        ].join('\n');
-        this.showNotice(msg, 10000);
-      },
+      callback: () => void this.viewStatusCommand(),
     });
 
     this.addCommand({
       id: 'toggle-auto-sync',
       name: 'Toggle auto sync',
-      callback: async () => {
-        this.settings.autoSync = !this.settings.autoSync;
-        await this.saveSettings();
-        this.showNotice(t('notice.autoSyncToggled', { status: this.settings.autoSync ? t('notice.autoSyncEnabled') : t('notice.autoSyncDisabled') }));
-      },
+      callback: () => void this.toggleAutoSyncCommand(),
     });
 
     this.addCommand({

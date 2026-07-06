@@ -7,7 +7,6 @@ import { t } from '../i18n';
 export class OAuthModal extends Modal {
   private userCode: string;
   private verificationUri: string;
-  private resolve!: () => void;
   private timerEl!: HTMLElement;
   private secondsLeft: number = 300; // 5 minutes
 
@@ -28,19 +27,16 @@ export class OAuthModal extends Modal {
 
     // Code display (large, easy to read, selectable)
     const codeEl = contentEl.createDiv('oauth-code');
-    const codeSpan = codeEl.createEl('span', { text: this.userCode });
-    codeSpan.style.userSelect = 'all';
-    codeSpan.style.cursor = 'text';
+    const codeSpan = codeEl.createEl('span', { text: this.userCode, cls: 'oauth-code-text' });
 
     // Copy button
-    const copyRow = contentEl.createDiv();
-    copyRow.style.textAlign = 'center';
-    copyRow.style.marginTop = '8px';
+    const copyRow = contentEl.createDiv('oauth-copy-row');
     const copyBtn = copyRow.createEl('button', { text: t('oauth.copyCode') });
-    copyBtn.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(this.userCode);
-      copyBtn.setText(t('oauth.copied'));
-      window.setTimeout(() => copyBtn.setText(t('oauth.copyCode')), 2000);
+    copyBtn.addEventListener('click', () => {
+      void navigator.clipboard.writeText(this.userCode).then(() => {
+        copyBtn.setText(t('oauth.copied'));
+        window.setTimeout(() => copyBtn.setText(t('oauth.copyCode')), 2000);
+      });
     });
 
     // URL
@@ -48,17 +44,11 @@ export class OAuthModal extends Modal {
     const linkEl = contentEl.createEl('a', {
       text: this.verificationUri,
       href: this.verificationUri,
+      cls: 'oauth-link',
     });
-    linkEl.style.fontSize = '16px';
-    linkEl.style.wordBreak = 'break-all';
 
     // Open browser button
     const btnRow = contentEl.createDiv('oauth-buttons');
-    btnRow.style.display = 'flex';
-    btnRow.style.gap = '8px';
-    btnRow.style.marginTop = '16px';
-    btnRow.style.justifyContent = 'center';
-
     const openBtn = btnRow.createEl('button', { text: t('oauth.openBrowser') });
     openBtn.classList.add('mod-cta');
     openBtn.addEventListener('click', () => {
@@ -67,9 +57,6 @@ export class OAuthModal extends Modal {
 
     // Timer
     this.timerEl = contentEl.createDiv('oauth-timer');
-    this.timerEl.style.textAlign = 'center';
-    this.timerEl.style.marginTop = '12px';
-    this.timerEl.style.color = 'var(--text-muted)';
     this.updateTimer();
 
     // Start countdown
@@ -83,9 +70,7 @@ export class OAuthModal extends Modal {
     }, 1000);
 
     // Cancel button
-    const cancelRow = contentEl.createDiv();
-    cancelRow.style.textAlign = 'center';
-    cancelRow.style.marginTop = '16px';
+    const cancelRow = contentEl.createDiv('oauth-cancel-row');
     const cancelBtn = cancelRow.createEl('button', { text: t('oauth.cancel') });
     cancelBtn.addEventListener('click', () => {
       window.clearInterval(interval);

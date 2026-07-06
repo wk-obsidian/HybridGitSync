@@ -1,7 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
-import { requestDeviceCode, pollForAccessToken, listRepos, type Repo } from './auth/github-oauth';
+import { requestDeviceCode, pollForAccessToken, listRepos } from './auth/github-oauth';
 import { OAuthModal } from './auth/oauth-modal';
 
 export interface PluginSettings {
@@ -116,7 +116,7 @@ export class SettingsTab extends PluginSettingTab {
 
         statusEl.addButton(cb => cb
           .setButtonText(t('settings.githubDisconnect'))
-          .setWarning()
+          .setDestructive()
           .onClick(async () => {
             this.plugin.settings.apiToken = '';
             this.plugin.settings.remoteUrl = '';
