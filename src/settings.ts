@@ -353,14 +353,14 @@ export class SettingsTab extends PluginSettingTab {
   private async startOAuthFlow(): Promise<void> {
     try {
       // Step 1: Get device code
-      const { user_code, verification_uri, expires_in } = await requestDeviceCode();
+      const { device_code, user_code, verification_uri, expires_in } = await requestDeviceCode();
 
       // Step 2: Show modal with code
       const modal = new OAuthModal(this.app, user_code, verification_uri);
       modal.open();
 
-      // Step 3: Poll for token in background
-      const result = await pollForAccessToken(user_code, 5, Math.floor(expires_in / 5));
+      // Step 3: Poll for token in background (use device_code, not user_code!)
+      const result = await pollForAccessToken(device_code, 5, Math.floor(expires_in / 5));
 
       // Step 4: Close modal
       modal.close();

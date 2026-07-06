@@ -3,7 +3,7 @@ import { requestUrl } from 'obsidian';
 const CLIENT_ID = 'Ov23li2X90e8LQf3d9ou';
 const SCOPE = 'repo';
 const DEVICE_CODE_URL = 'https://github.com/login/device/code';
-const ACCESS_TOKEN_URL = 'https://github.com/oauth/access_token';
+const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const API_BASE = 'https://api.github.com';
 
 interface DeviceCodeResponse {
@@ -80,6 +80,7 @@ export async function pollForAccessToken(
 ): Promise<OAuthResult> {
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(interval * 1000);
+    console.log(`[OAuth] Polling attempt ${i + 1}/${maxAttempts}...`);
 
     const response = await requestUrl({
       url: ACCESS_TOKEN_URL,
@@ -96,21 +97,35 @@ export async function pollForAccessToken(
       throw: false,
     });
 
-    if (response.status !== 200) continue;
+    console.log('[OAuth] Response status:', response.status);
+    console.log('[OAuth] Response body:', response.text);
+
+    if (response.status !== 200) {
+      console.log('[OAuth] Non-200 status, continuing...');
+      continue;
+    }
 
     const data = response.json as TokenResponse;
+    console.log('[OAuth] Parsed response:', data);
 
     if (data.access_token) {
+      console.log('[OAuth] Got access token!');
       const username = await getUsername(data.access_token);
       return { success: true, token: data.access_token, username };
     }
 
-    if (data.error === 'authorization_pending') continue;
+    if (data.error === 'authorization_pending') {
+      console.log('[OAuth] Still pending...');
+      continue;
+    }
+
     if (data.error === 'slow_down') {
+      console.log('[OAuth] Slowing down...');
       interval += 5;
       continue;
     }
 
+    console.log('[OAuth] Error:', data.error, data.error_description);
     return { success: false, error: data.error_description || data.error };
   }
 
