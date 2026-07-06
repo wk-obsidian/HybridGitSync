@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
+import { requestDeviceCode, pollForAccessToken, listRepos, verifyToken, type Repo } from './auth/github-oauth';
 
 export interface PluginSettings {
   // Backend
@@ -104,6 +105,82 @@ export class SettingsTab extends PluginSettingTab {
   private renderRemoteSettings(el: HTMLElement): void {
     new Setting(el).setName(t('settings.remote')).setHeading();
 
+    // GitHub OAuth section (only for GitHub)
+    if (this.plugin.settings.apiProvider === 'github') {
+      // Show current auth status
+      if (this.plugin.settings.apiToken) {
+        const statusEl = new Setting(el)
+          .setName(t('settings.githubConnected'))
+          .setDesc(t('settings.githubConnectedDesc'));
+
+        statusEl.addButton(cb => cb
+          .setButtonText(t('settings.githubDisconnect'))
+          .setWarning()
+          .onClick(async () => {
+            this.plugin.settings.apiToken = '';
+            this.plugin.settings.remoteUrl = '';
+            this.plugin.settings.branch = 'main';
+            await this.plugin.saveSettings();
+            this.display();
+          }));
+      } else {
+        // Show connect button
+        new Setting(el)
+          .setName(t('settings.githubConnect'))
+          .setDesc(t('settings.githubConnectDesc'))
+          .addButton(cb => cb
+            .setButtonText(t('settings.githubConnectButton'))
+            .setCta()
+            .onClick(async () => {
+              await this.startOAuthFlow();
+            }));
+      }
+    }
+
+    // Manual token input (for non-GitHub or manual mode)
+    if (this.plugin.settings.apiProvider !== 'github' || !this.plugin.settings.apiToken) {
+      new Setting(el)
+        .setName(t('settings.apiToken'))
+        .setDesc(t('settings.apiTokenDesc'))
+        .addText(cb => {
+          cb.inputEl.type = 'password';
+          cb.inputEl.addClass('settings-full-width');
+          cb
+            .setPlaceholder('ghp_xxxx...')
+            .setValue(this.plugin.settings.apiToken)
+            .onChange(async (value) => {
+              this.plugin.settings.apiToken = value;
+              await this.plugin.saveSettings();
+            });
+        });
+    }
+
+    // Repo selection (only when connected to GitHub)
+    if (this.plugin.settings.apiProvider === 'github' && this.plugin.settings.apiToken) {
+      new Setting(el)
+        .setName(t('settings.selectRepo'))
+        .setDesc(t('settings.selectRepoDesc'))
+        .addDropdown(cb => {
+          cb.addOption('', t('settings.selectRepoPlaceholder'));
+          // Load repos asynchronously
+          this.loadRepos(cb);
+          cb.onChange(async (value) => {
+            if (value) {
+              this.plugin.settings.remoteUrl = value;
+              // Auto-set branch from repo
+              const repos = await listRepos(this.plugin.settings.apiToken);
+              const repo = repos.find(r => r.fullName === value);
+              if (repo) {
+                this.plugin.settings.branch = repo.defaultBranch;
+              }
+              await this.plugin.saveSettings();
+              this.display();
+            }
+          });
+        });
+    }
+
+    // Manual remote URL input
     new Setting(el)
       .setName(t('settings.remoteUrl'))
       .setDesc(t('settings.remoteUrlDesc'))
@@ -126,7 +203,7 @@ export class SettingsTab extends PluginSettingTab {
           await this.plugin.saveSettings();
         }));
 
-    // API settings
+    // API provider selection
     new Setting(el)
       .setName(t('settings.apiProvider'))
       .setDesc(t('settings.apiProviderDesc'))
@@ -138,22 +215,8 @@ export class SettingsTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.apiProvider = value as PluginSettings['apiProvider'];
           await this.plugin.saveSettings();
+          this.display();
         }));
-
-    new Setting(el)
-      .setName(t('settings.apiToken'))
-      .setDesc(t('settings.apiTokenDesc'))
-      .addText(cb => {
-        cb.inputEl.type = 'password';
-        cb.inputEl.addClass('settings-full-width');
-        cb
-          .setPlaceholder('ghp_xxxx...')
-          .setValue(this.plugin.settings.apiToken)
-          .onChange(async (value) => {
-            this.plugin.settings.apiToken = value;
-            await this.plugin.saveSettings();
-          });
-      });
 
     new Setting(el)
       .setName(t('settings.customApiUrl'))
@@ -284,5 +347,53 @@ export class SettingsTab extends PluginSettingTab {
           this.plugin.settings.debug = value;
           await this.plugin.saveSettings();
         }));
+  }
+
+  private async startOAuthFlow(): Promise<void> {
+    try {
+      // Step 1: Get device code
+      const { user_code, verification_uri, expires_in } = await requestDeviceCode();
+
+      // Step 2: Show instructions
+      const notice = new Notice(
+        `${t('notice.oauthInstructions')}\n\nCode: ${user_code}\nURL: ${verification_uri}`,
+        60000
+      );
+
+      // Step 3: Open browser
+      window.open(verification_uri, '_blank');
+
+      // Step 4: Poll for token
+      const result = await pollForAccessToken(user_code, 5, Math.floor(expires_in / 5));
+      notice.hide();
+
+      if (result.success && result.token) {
+        this.plugin.settings.apiToken = result.token;
+        await this.plugin.saveSettings();
+        new Notice(t('notice.oauthSuccess', { username: result.username || '' }));
+        this.display(); // Refresh to show repo selector
+      } else {
+        new Notice(t('notice.oauthFailed'));
+      }
+    } catch (error) {
+      console.error('[HybridGitSync] OAuth error:', error);
+      new Notice(t('notice.oauthError'));
+    }
+  }
+
+  private async loadRepos(dropdown: any): Promise<void> {
+    try {
+      const repos = await listRepos(this.plugin.settings.apiToken);
+      for (const repo of repos) {
+        const label = repo.private ? `🔒 ${repo.fullName}` : repo.fullName;
+        dropdown.addOption(repo.fullName, label);
+      }
+      // Set current value if exists
+      if (this.plugin.settings.remoteUrl) {
+        dropdown.setValue(this.plugin.settings.remoteUrl);
+      }
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to load repos:', error);
+    }
   }
 }
