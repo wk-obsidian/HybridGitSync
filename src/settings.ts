@@ -379,7 +379,7 @@ export class SettingsTab extends PluginSettingTab {
     }
   }
 
-  private async loadRepos(dropdown: any): Promise<void> {
+  private async loadRepos(dropdown: { addOption: (value: string, label: string) => void; setValue: (value: string) => void }): Promise<void> {
     try {
       const repos = await listRepos(this.plugin.settings.apiToken);
       for (const repo of repos) {
