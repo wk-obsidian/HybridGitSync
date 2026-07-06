@@ -1,7 +1,8 @@
 import { App, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
-import { requestDeviceCode, pollForAccessToken, listRepos, verifyToken, type Repo } from './auth/github-oauth';
+import { requestDeviceCode, pollForAccessToken, listRepos, type Repo } from './auth/github-oauth';
+import { OAuthModal } from './auth/oauth-modal';
 
 export interface PluginSettings {
   // Backend
@@ -354,18 +355,15 @@ export class SettingsTab extends PluginSettingTab {
       // Step 1: Get device code
       const { user_code, verification_uri, expires_in } = await requestDeviceCode();
 
-      // Step 2: Show instructions
-      const notice = new Notice(
-        `${t('notice.oauthInstructions')}\n\nCode: ${user_code}\nURL: ${verification_uri}`,
-        60000
-      );
+      // Step 2: Show modal with code
+      const modal = new OAuthModal(this.app, user_code, verification_uri);
+      modal.open();
 
-      // Step 3: Open browser
-      window.open(verification_uri, '_blank');
-
-      // Step 4: Poll for token
+      // Step 3: Poll for token in background
       const result = await pollForAccessToken(user_code, 5, Math.floor(expires_in / 5));
-      notice.hide();
+
+      // Step 4: Close modal
+      modal.close();
 
       if (result.success && result.token) {
         this.plugin.settings.apiToken = result.token;

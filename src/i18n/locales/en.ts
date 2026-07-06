@@ -173,4 +173,19 @@ export default {
   'settings.advanced': 'Advanced',
   'settings.debugMode': 'Debug mode',
   'settings.debugModeDesc': 'Enable verbose logging in developer console',
+
+  // Notices
+  'notice.oauthInstructions': 'Visit GitHub and enter the code shown',
+  'notice.oauthWaiting': 'Waiting for authorization...',
+  'notice.oauthSuccess': 'Connected as {username}',
+  'notice.oauthFailed': 'Authorization failed',
+  'notice.oauthError': 'Authorization error',
+
+  // OAuth Modal
+  'oauth.title': 'Authorize with GitHub',
+  'oauth.step1': 'Step 1: Copy this code:',
+  'oauth.step2': 'Step 2: Visit this URL and enter the code:',
+  'oauth.openBrowser': 'Open Browser',
+  'oauth.cancel': 'Cancel',
+  'oauth.expiresIn': 'Expires in {time}',
 };

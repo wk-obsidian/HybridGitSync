@@ -173,4 +173,19 @@ export default {
   'settings.advanced': '高级',
   'settings.debugMode': '调试模式',
   'settings.debugModeDesc': '在开发者控制台启用详细日志',
+
+  // 通知
+  'notice.oauthInstructions': '请访问 GitHub 并输入显示的代码',
+  'notice.oauthWaiting': '等待授权...',
+  'notice.oauthSuccess': '已连接为 {username}',
+  'notice.oauthFailed': '授权失败',
+  'notice.oauthError': '授权错误',
+
+  // OAuth 弹窗
+  'oauth.title': 'GitHub 授权',
+  'oauth.step1': '第一步：复制此代码：',
+  'oauth.step2': '第二步：访问此网址并输入代码：',
+  'oauth.openBrowser': '打开浏览器',
+  'oauth.cancel': '取消',
+  'oauth.expiresIn': '剩余时间 {time}',
 };
