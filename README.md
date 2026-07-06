@@ -12,44 +12,58 @@ A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and Gi
 - ✅ Parallel transfer (up to 3 concurrent)
 - ✅ Auto sync (timer/file change trigger)
 - ✅ Conflict detection and resolution
-- ✅ .gitignore support
+- ✅ .gitignore support (auto-create with localized comments)
+
+### Authentication
+- ✅ GitHub OAuth (one-click authorization)
+- ✅ Personal Access Token support
+- ✅ Repository selection after authorization
 
 ### Platform Support
 - ✅ Windows / macOS / Linux (Git mode)
 - ✅ Android / iOS (API mode)
-- ✅ Auto-detect platform and select backend
+- ✅ Auto-detect backend (Git installed + vault is repo → Git mode)
 
 ### User Interface
-- ✅ Status bar shows sync state
+- ✅ Status bar with sync state
 - ✅ Ribbon icons for quick access
 - ✅ Commit history view
-- ✅ Diff view
+- ✅ Diff view with line-by-line comparison
 - ✅ Changed files panel
 - ✅ Conflict resolution modal
+
+### Multi-language
+- ✅ English
+- ✅ Chinese (中文)
+- ✅ Auto-detect from Obsidian settings
 
 ### Utilities
 - ✅ Settings import/export
 - ✅ Log viewer and export
-- ✅ Sync state clearing
+- ✅ Sync state management
 - ✅ Network status detection
 - ✅ Offline queue
 
 ## Installation
 
-1. Download `main.js` and `manifest.json`
-2. Place in `.obsidian/plugins/hybrid-git-sync/`
-3. Enable the plugin in Obsidian
+### From Community Plugins
+1. Open Settings → Community Plugins
+2. Search for "Hybrid Git Sync"
+3. Install and enable
 
-## Configuration
+### Manual
+1. Download `hybrid-git-sync-1.0.4.zip`
+2. Extract to `.obsidian/plugins/hybrid-git-sync/`
+3. Enable the plugin in Settings → Community Plugins
 
-### API Mode (Mobile)
+## Quick Start
 
-1. Create a repository on GitHub
-2. Generate a Personal Access Token (requires `repo` scope)
-3. Configure in plugin settings:
-   - Remote URL: `username/repo`
-   - API Token: your token
-   - Branch: `main`
+### GitHub (Recommended)
+
+1. Open plugin settings
+2. Click **Connect** to authorize with GitHub
+3. Select a repository from the dropdown
+4. Done! The plugin will auto-sync
 
 ### Git Mode (Desktop)
 
@@ -57,6 +71,23 @@ A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and Gi
 2. Initialize Git in vault directory: `git init`
 3. Configure remote: `git remote add origin <url>`
 4. The plugin will automatically use system Git
+
+### API Mode (Mobile)
+
+1. Create a repository on GitHub
+2. Generate a Personal Access Token (requires `repo` scope)
+3. Configure in plugin settings:
+   - API Provider: GitHub
+   - API Token: your token
+   - Remote URL: `username/repo`
+
+## Backend Modes
+
+| Mode | Description | Use Case |
+|---|---|---|
+| Auto (recommended) | Auto-detect based on Git availability | Default |
+| Git | Use system Git | Desktop with Git installed |
+| API | Use GitHub/GitLab/Gitea API | Mobile or no Git |
 
 ## Commands
 
@@ -72,7 +103,7 @@ A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and Gi
 | Restore file from remote | Restore file from remote |
 | Switch branch | View/switch branch |
 | Toggle auto sync | Toggle auto sync |
-| View logs | View logs |
+| View logs | View logs (copy to clipboard) |
 | Export settings | Export settings |
 | Import settings | Import settings |
 | Clear sync state | Clear sync state |
@@ -82,29 +113,36 @@ A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and Gi
 The plugin automatically reads `.gitignore` file. If none exists, it creates one with these rules:
 
 ```gitignore
-# Obsidian
+# Obsidian - Device-specific files
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
-.obsidian/plugins/*/main.js
-.obsidian/plugins/*/manifest.json
-.obsidian/plugins/*/styles.css
-.obsidian/plugins/*/data.json
 
-# OS
+# Plugins directory (code, config, dependencies)
+.obsidian/plugins/
+
+# Cache
+.obsidian/cache/
+
+# Trash
+.trash/
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Temp
+# Temp files
 *.tmp
 *.bak
+*.swp
+*~
 ```
 
 ## Known Limitations
 
 - API mode does not support SSH authentication
-- API mode single file limit is 100MB
+- API mode single file limit is 50MB
 - Mobile cannot run continuous background sync
-- GitLab/Gitea support planned
+- GitLab/Gitea support planned for future release
 
 ## Development
 
