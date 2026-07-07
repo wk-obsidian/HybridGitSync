@@ -114,16 +114,17 @@ export class SettingsTab extends PluginSettingTab {
           .setName(t('settings.githubConnected'))
           .setDesc(t('settings.githubConnectedDesc'));
 
-        statusEl.addButton(cb => cb
-          .setButtonText(t('settings.githubDisconnect'))
-          .setDestructive()
-          .onClick(async () => {
+        statusEl.addButton(cb => {
+          cb.setButtonText(t('settings.githubDisconnect'));
+          cb.buttonEl.addClass('btn-destructive');
+          cb.onClick(async () => {
             this.plugin.settings.apiToken = '';
             this.plugin.settings.remoteUrl = '';
             this.plugin.settings.branch = 'main';
             await this.plugin.saveSettings();
             this.display();
-          }));
+          });
+        });
       } else {
         // Show connect button
         new Setting(el)

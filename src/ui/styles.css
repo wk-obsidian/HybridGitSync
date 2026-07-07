@@ -385,3 +385,14 @@
   text-align: center;
   margin-top: 16px;
 }
+
+/* Destructive button */
+.btn-destructive {
+  color: var(--text-error);
+  border-color: var(--text-error);
+}
+
+.btn-destructive:hover {
+  background-color: var(--text-error);
+  color: var(--text-on-accent);
+}
