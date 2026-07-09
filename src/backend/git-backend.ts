@@ -20,6 +20,39 @@ export class GitBackend extends SyncBackend {
     this.token = token;
   }
 
+  /**
+   * Get remote URL from git config
+   */
+  async getRemoteUrl(): Promise<string | null> {
+    try {
+      const url = await this.exec('remote get-url origin');
+      return url.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get current branch name
+   */
+  async getCurrentBranch(): Promise<string | null> {
+    try {
+      const branch = await this.exec('rev-parse --abbrev-ref HEAD');
+      return branch.trim() || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Get remote repository info (auto-detect)
+   */
+  async getRepoInfo(): Promise<{ remoteUrl: string | null; branch: string | null }> {
+    const remoteUrl = await this.getRemoteUrl();
+    const branch = await this.getCurrentBranch();
+    return { remoteUrl, branch };
+  }
+
   async isAvailable(): Promise<boolean> {
     try {
       await this.exec('--version');

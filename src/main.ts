@@ -148,6 +148,24 @@ export default class HybridGitSyncPlugin extends Plugin {
           remoteUrl = `https://github.com/${remoteUrl}.git`;
         }
         this.backend = new GitBackend(this.app.vault, this.settings.gitPath, remoteUrl, this.settings.apiToken);
+
+        // Auto-detect remote info if not configured
+        if (!this.settings.remoteUrl) {
+          const gitBackend = this.backend as GitBackend;
+          const repoInfo = await gitBackend.getRepoInfo();
+          if (repoInfo.remoteUrl) {
+            this.settings.remoteUrl = repoInfo.remoteUrl;
+            this.log('Auto-detected remote URL:', repoInfo.remoteUrl);
+          }
+          if (repoInfo.branch) {
+            this.settings.branch = repoInfo.branch;
+            this.log('Auto-detected branch:', repoInfo.branch);
+          }
+          if (repoInfo.remoteUrl || repoInfo.branch) {
+            await this.saveSettings();
+            this.showNotice(t('notice.gitAutoDetected'));
+          }
+        }
       }
     } else {
       this.backend = this.createApiBackend();

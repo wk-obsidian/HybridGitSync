@@ -49,6 +49,7 @@ export default {
   'notice.autoSyncDisabled': 'Auto sync disabled',
   'notice.initFailed': 'Failed to initialize sync backend. Check settings.',
   'notice.gitNotAvailable': 'Git backend is not available on mobile. Using API backend.',
+  'notice.gitAutoDetected': 'Auto-detected remote repository settings',
   'notice.gitignoreCreated': 'Created .gitignore with default rules',
   'notice.conflictsResolved': 'All conflicts resolved',
   'notice.conflictResolved': 'Resolved {path}: {resolution}',

@@ -49,6 +49,7 @@ export default {
   'notice.autoSyncDisabled': '自动同步已关闭',
   'notice.initFailed': '同步后端初始化失败。请检查设置。',
   'notice.gitNotAvailable': '移动端不支持 Git 后端，使用 API 后端。',
+  'notice.gitAutoDetected': '已自动检测远程仓库设置',
   'notice.gitignoreCreated': '已创建 .gitignore 默认规则',
   'notice.conflictsResolved': '所有冲突已解决',
   'notice.conflictResolved': '已解决 {path}：{resolution}',
