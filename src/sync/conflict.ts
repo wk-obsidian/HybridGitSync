@@ -169,16 +169,13 @@ export class ConflictResolver {
         }
 
         case 'merge': {
-          // Merge both versions with conflict markers (Git-style)
+          // Merge both versions with conflict markers (Git-style, line-level)
           console.log('[ConflictResolver] Merge case entered for:', conflict.path);
 
-          const mergedContent = [
-            '<<<<<<< LOCAL',
+          const mergedContent = this.mergeWithConflictMarkers(
             conflict.localContent,
-            '=======',
-            conflict.remoteContent,
-            '>>>>>>> REMOTE',
-          ].join('\n');
+            conflict.remoteContent
+          );
 
           await this.vault.adapter.write(conflict.path, mergedContent);
           console.log('[ConflictResolver] Merged file written:', conflict.path);
@@ -234,6 +231,66 @@ export class ConflictResolver {
       removed: changes.filter(c => c.type === 'removed').length,
       modified: changes.filter(c => c.type === 'modified').length,
     };
+  }
+
+  /**
+   * Merge two versions with conflict markers (line-level, like Git)
+   * Only conflicting sections get markers, not the entire file
+   */
+  private mergeWithConflictMarkers(local: string, remote: string): string {
+    const localLines = local.split('\n');
+    const remoteLines = remote.split('\n');
+    const result: string[] = [];
+
+    const maxLen = Math.max(localLines.length, remoteLines.length);
+    let inConflict = false;
+    let conflictLocal: string[] = [];
+    let conflictRemote: string[] = [];
+
+    for (let i = 0; i < maxLen; i++) {
+      const localLine = i < localLines.length ? localLines[i] : undefined;
+      const remoteLine = i < remoteLines.length ? remoteLines[i] : undefined;
+
+      if (localLine === remoteLine) {
+        // Lines are the same
+        if (inConflict) {
+          // End of conflict section - write conflict markers
+          result.push('<<<<<<< LOCAL');
+          result.push(...conflictLocal);
+          result.push('=======');
+          result.push(...conflictRemote);
+          result.push('>>>>>>> REMOTE');
+          conflictLocal = [];
+          conflictRemote = [];
+          inConflict = false;
+        }
+        if (localLine !== undefined) {
+          result.push(localLine);
+        }
+      } else {
+        // Lines are different - start or continue conflict
+        if (!inConflict) {
+          inConflict = true;
+        }
+        if (localLine !== undefined) {
+          conflictLocal.push(localLine);
+        }
+        if (remoteLine !== undefined) {
+          conflictRemote.push(remoteLine);
+        }
+      }
+    }
+
+    // Handle remaining conflict at end of file
+    if (inConflict) {
+      result.push('<<<<<<< LOCAL');
+      result.push(...conflictLocal);
+      result.push('=======');
+      result.push(...conflictRemote);
+      result.push('>>>>>>> REMOTE');
+    }
+
+    return result.join('\n');
   }
 }
 
