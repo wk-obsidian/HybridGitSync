@@ -339,6 +339,28 @@
   font-size: 12px;
 }
 
+/* Merge View */
+.merge-instructions {
+  margin: 16px 0;
+  padding: 12px;
+  background: var(--background-secondary);
+  border-radius: 8px;
+}
+
+.merge-instructions p {
+  margin: 8px 0;
+}
+
+.merge-status {
+  text-align: center;
+  margin: 16px 0;
+}
+
+.merge-status-text {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Settings */
 .settings-full-width {
   width: 100%;

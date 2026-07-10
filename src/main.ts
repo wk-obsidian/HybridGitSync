@@ -423,11 +423,20 @@ export default class HybridGitSyncPlugin extends Plugin {
         await resolver.resolve(conflict, resolution);
 
         if (resolution === 'merge') {
-          // For merge, don't continue - let user edit the file
-          this.showNotice(t('notice.mergeWritten', { path: conflict.path }));
-          this.isResolvingConflicts = false;
-          this.pauseFileChangeSync = false;
-          return;
+          // For merge, update sync state with current file content
+          // The user has edited the file and clicked "Done"
+          try {
+            const file = this.app.vault.getAbstractFileByPath(conflict.path);
+            if (file) {
+              const content = await this.app.vault.read(file as any);
+              const contentHash = await apiBackend.gitBlobSha1(content);
+              stateManager.setFileState(conflict.path, contentHash);
+              await stateManager.save();
+              console.log('[HybridGitSync] Updated sync state after merge:', conflict.path);
+            }
+          } catch (error) {
+            console.error('[HybridGitSync] Failed to update sync state:', error);
+          }
         }
 
         this.showNotice(t('notice.conflictResolved', { path: conflict.path, resolution }));
