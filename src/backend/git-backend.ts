@@ -88,7 +88,7 @@ export class GitBackend extends SyncBackend {
 
   async pull(): Promise<SyncResult> {
     try {
-      const output = await this.exec('pull --rebase');
+      const output = await this.exec('pull --no-rebase');
       return {
         success: true,
         message: output.trim(),
@@ -156,9 +156,9 @@ export class GitBackend extends SyncBackend {
         await this.exec(`commit -m "sync: ${timestamp}"`);
       }
 
-      // Step 3: Try to pull with rebase (skip if remote is empty or no upstream)
+      // Step 3: Try to pull with merge (skip if remote is empty or no upstream)
       try {
-        await this.exec('pull --rebase');
+        await this.exec('pull --no-rebase');
       } catch (pullError) {
         // Remote might be empty or no upstream set — that's OK for first push
         const msg = (pullError as Error).message;

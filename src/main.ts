@@ -237,25 +237,22 @@ export default class HybridGitSyncPlugin extends Plugin {
   // ===== Sync Operations =====
 
   async performSync(): Promise<void> {
-    this.log('performSync called', {
-      hasSettings: !!this.settings,
-      hasBackend: !!this.backend,
-      hasNetwork: !!this.network,
-      hasStatusBar: !!this.statusBar,
-    });
+    console.log('[HybridGitSync] performSync called');
 
     // Don't sync while resolving conflicts
     if (this.isResolvingConflicts) {
-      this.log('Sync skipped: resolving conflicts');
+      console.log('[HybridGitSync] Sync skipped: resolving conflicts');
       return;
     }
 
     if (!this.settings.remoteUrl) {
+      console.log('[HybridGitSync] Sync skipped: no remote URL');
       this.showNotice(t('sync.skipped.noRemote'));
       return;
     }
 
     if (!this.network.isOnline()) {
+      console.log('[HybridGitSync] Sync skipped: offline');
       this.statusBar.setState('offline');
       this.showNotice(t('sync.skipped.offline'));
       return;
@@ -263,20 +260,24 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Check if backend is initialized
     if (!this.backend) {
+      console.log('[HybridGitSync] Sync skipped: backend not initialized');
       this.statusBar.setState('error', 'Backend not initialized');
       this.showNotice(t('sync.skipped.backendNotInitialized'));
       return;
     }
 
     // Check backend availability
+    console.log('[HybridGitSync] Checking backend availability...');
     const available = await this.backend.isAvailable();
     if (!available) {
+      console.log('[HybridGitSync] Sync skipped: backend not available');
       this.statusBar.setState('error', 'Backend not available');
       this.showNotice(t('sync.skipped.backendNotAvailable', { backend: this.backend.name }));
       return;
     }
 
     // Use sync queue with debouncing
+    console.log('[HybridGitSync] Enqueuing sync operation...');
     this.syncQueue.enqueue(async () => {
       this.log('Sync queue callback executing', {
         hasBackend: !!this.backend,

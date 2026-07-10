@@ -50,7 +50,7 @@ export const DEFAULT_SETTINGS: PluginSettings = {
   syncOnFileChange: true,
   fileChangeDebounce: 30,
   commitMessage: 'vault backup: {{date}}',
-  pullStrategy: 'rebase',
+  pullStrategy: 'merge',
   showNotice: true,
   debug: false,
 };
