@@ -81,6 +81,7 @@ export default {
   'ui.resolveConflict': 'Resolve Conflict',
   'ui.keepLocal': 'Keep Local',
   'ui.keepRemote': 'Keep Remote',
+  'ui.merge': 'Merge',
   'ui.saveBoth': 'Save Both',
   'ui.skip': 'Skip',
   'ui.processing': 'Processing...',

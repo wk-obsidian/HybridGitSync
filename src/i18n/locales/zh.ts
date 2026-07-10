@@ -81,6 +81,7 @@ export default {
   'ui.resolveConflict': '解决冲突',
   'ui.keepLocal': '保留本地',
   'ui.keepRemote': '保留远程',
+  'ui.merge': '合并',
   'ui.saveBoth': '保存两者',
   'ui.skip': '跳过',
   'ui.processing': '处理中...',

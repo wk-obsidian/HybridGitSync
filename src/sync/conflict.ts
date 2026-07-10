@@ -2,7 +2,7 @@ import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
 
-export type ConflictResolution = 'local' | 'remote' | 'both' | 'skip';
+export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
 
 export interface ConflictInfo {
   path: string;
@@ -165,6 +165,26 @@ export class ConflictResolver {
           // Remove original path from state
           this.stateManager.removeFileState(conflict.path);
           this.stateManager.removeRemoteSha(conflict.path);
+          break;
+        }
+
+        case 'merge': {
+          // Merge both versions with conflict markers (Git-style)
+          const mergedContent = [
+            '<<<<<<< LOCAL',
+            conflict.localContent,
+            '=======',
+            conflict.remoteContent,
+            '>>>>>>> REMOTE',
+          ].join('\n');
+
+          console.log('[ConflictResolver] Merging with conflict markers:', conflict.path);
+          await this.vault.adapter.write(conflict.path, mergedContent);
+
+          // Update sync state with merged content hash
+          const mergedHash = await this.gitBlobSha1(mergedContent);
+          this.stateManager.setFileState(conflict.path, mergedHash);
+          // Keep remote SHA as-is (will be updated on next sync)
           break;
         }
 

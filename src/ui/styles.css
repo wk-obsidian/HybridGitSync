@@ -318,6 +318,11 @@
   color: var(--text-warning);
 }
 
+.conflict-btn.btn-merge {
+  border-color: var(--text-accent);
+  color: var(--text-accent);
+}
+
 .conflict-btn.btn-both {
   border-color: var(--text-muted);
   color: var(--text-muted);

@@ -64,6 +64,7 @@ export class ConflictModal extends Modal {
     const buttonEl = contentEl.createDiv('conflict-buttons');
     this.createButton(buttonEl, t('ui.keepLocal'), 'local', 'btn-local');
     this.createButton(buttonEl, t('ui.keepRemote'), 'remote', 'btn-remote');
+    this.createButton(buttonEl, t('ui.merge'), 'merge', 'btn-merge');
     this.createButton(buttonEl, t('ui.saveBoth'), 'both', 'btn-both');
     this.createButton(buttonEl, t('ui.skip'), 'skip', 'btn-skip');
   }
