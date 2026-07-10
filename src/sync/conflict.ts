@@ -1,6 +1,7 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
+import { computeDiff, mergeWithConflictMarkers, type DiffResult, type DiffLine } from '../utils/diff';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
 
@@ -172,7 +173,7 @@ export class ConflictResolver {
           // Merge both versions with conflict markers (Git-style, line-level)
           console.log('[ConflictResolver] Merge case entered for:', conflict.path);
 
-          const mergedContent = this.mergeWithConflictMarkers(
+          const mergedContent = mergeWithConflictMarkers(
             conflict.localContent,
             conflict.remoteContent
           );
@@ -202,95 +203,23 @@ export class ConflictResolver {
   }
 
   /**
-   * Generate a simple diff between two texts
+   * Generate diff between two texts using diff library
    */
   generateDiff(local: string, remote: string): DiffResult {
-    const localLines = local.split('\n');
-    const remoteLines = remote.split('\n');
-    const changes: DiffLine[] = [];
-
-    const maxLen = Math.max(localLines.length, remoteLines.length);
-    for (let i = 0; i < maxLen; i++) {
-      const localLine = i < localLines.length ? localLines[i] : undefined;
-      const remoteLine = i < remoteLines.length ? remoteLines[i] : undefined;
-
-      if (localLine === undefined) {
-        changes.push({ type: 'added', line: remoteLine!, lineNum: i + 1 });
-      } else if (remoteLine === undefined) {
-        changes.push({ type: 'removed', line: localLine, lineNum: i + 1 });
-      } else if (localLine !== remoteLine) {
-        changes.push({ type: 'modified', line: localLine, lineNum: i + 1, newLine: remoteLine });
-      } else {
-        changes.push({ type: 'unchanged', line: localLine, lineNum: i + 1 });
-      }
-    }
-
+    const result = computeDiff(local, remote);
     return {
-      changes,
-      added: changes.filter(c => c.type === 'added').length,
-      removed: changes.filter(c => c.type === 'removed').length,
-      modified: changes.filter(c => c.type === 'modified').length,
+      changes: result.lines.map(line => ({
+        type: line.type === 'added' ? 'added' as const :
+              line.type === 'removed' ? 'removed' as const :
+              'unchanged' as const,
+        line: line.content,
+        lineNum: line.oldLineNum || line.newLineNum || 0,
+        newLine: line.type === 'added' ? line.content : undefined,
+      })),
+      added: result.added,
+      removed: result.removed,
+      modified: 0, // diff library doesn't distinguish modified from added+removed
     };
-  }
-
-  /**
-   * Merge two versions with conflict markers (line-level, like Git)
-   * Only conflicting sections get markers, not the entire file
-   */
-  private mergeWithConflictMarkers(local: string, remote: string): string {
-    const localLines = local.split('\n');
-    const remoteLines = remote.split('\n');
-    const result: string[] = [];
-
-    const maxLen = Math.max(localLines.length, remoteLines.length);
-    let inConflict = false;
-    let conflictLocal: string[] = [];
-    let conflictRemote: string[] = [];
-
-    for (let i = 0; i < maxLen; i++) {
-      const localLine = i < localLines.length ? localLines[i] : undefined;
-      const remoteLine = i < remoteLines.length ? remoteLines[i] : undefined;
-
-      if (localLine === remoteLine) {
-        // Lines are the same
-        if (inConflict) {
-          // End of conflict section - write conflict markers
-          result.push('<<<<<<< LOCAL');
-          result.push(...conflictLocal);
-          result.push('=======');
-          result.push(...conflictRemote);
-          result.push('>>>>>>> REMOTE');
-          conflictLocal = [];
-          conflictRemote = [];
-          inConflict = false;
-        }
-        if (localLine !== undefined) {
-          result.push(localLine);
-        }
-      } else {
-        // Lines are different - start or continue conflict
-        if (!inConflict) {
-          inConflict = true;
-        }
-        if (localLine !== undefined) {
-          conflictLocal.push(localLine);
-        }
-        if (remoteLine !== undefined) {
-          conflictRemote.push(remoteLine);
-        }
-      }
-    }
-
-    // Handle remaining conflict at end of file
-    if (inConflict) {
-      result.push('<<<<<<< LOCAL');
-      result.push(...conflictLocal);
-      result.push('=======');
-      result.push(...conflictRemote);
-      result.push('>>>>>>> REMOTE');
-    }
-
-    return result.join('\n');
   }
 }
 
