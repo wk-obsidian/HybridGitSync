@@ -171,8 +171,6 @@ export class ConflictResolver {
         case 'merge': {
           // Merge both versions with conflict markers (Git-style)
           console.log('[ConflictResolver] Merge case entered for:', conflict.path);
-          console.log('[ConflictResolver] Local content length:', conflict.localContent.length);
-          console.log('[ConflictResolver] Remote content length:', conflict.remoteContent.length);
 
           const mergedContent = [
             '<<<<<<< LOCAL',
@@ -182,15 +180,11 @@ export class ConflictResolver {
             '>>>>>>> REMOTE',
           ].join('\n');
 
-          console.log('[ConflictResolver] Merged content length:', mergedContent.length);
-          console.log('[ConflictResolver] Writing merged file...');
           await this.vault.adapter.write(conflict.path, mergedContent);
-          console.log('[ConflictResolver] Merged file written successfully');
+          console.log('[ConflictResolver] Merged file written:', conflict.path);
 
-          // Update sync state with merged content hash
-          const mergedHash = await this.gitBlobSha1(mergedContent);
-          this.stateManager.setFileState(conflict.path, mergedHash);
-          // Keep remote SHA as-is (will be updated on next sync)
+          // Don't update sync state - file needs manual resolution
+          // The conflict will be re-detected until user removes conflict markers
           break;
         }
 

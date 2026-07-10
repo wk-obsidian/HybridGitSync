@@ -421,6 +421,15 @@ export default class HybridGitSyncPlugin extends Plugin {
 
       new ConflictModal(this.app, conflict, diff, async (resolution) => {
         await resolver.resolve(conflict, resolution);
+
+        if (resolution === 'merge') {
+          // For merge, don't continue - let user edit the file
+          this.showNotice(t('notice.mergeWritten', { path: conflict.path }));
+          this.isResolvingConflicts = false;
+          this.pauseFileChangeSync = false;
+          return;
+        }
+
         this.showNotice(t('notice.conflictResolved', { path: conflict.path, resolution }));
         current++;
         processNext();

@@ -53,6 +53,7 @@ export default {
   'notice.gitignoreCreated': 'Created .gitignore with default rules',
   'notice.conflictsResolved': 'All conflicts resolved',
   'notice.conflictResolved': 'Resolved {path}: {resolution}',
+  'notice.mergeWritten': 'Conflict markers written to {path}. Please edit to resolve, then sync again.',
   'notice.logsCopied': 'Logs copied to clipboard',
   'notice.settingsExported': 'Settings exported to .obsidian/plugins/hybrid-git-sync/settings-export.json',
   'notice.settingsImported': 'Settings imported successfully',

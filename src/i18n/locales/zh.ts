@@ -53,6 +53,7 @@ export default {
   'notice.gitignoreCreated': '已创建 .gitignore 默认规则',
   'notice.conflictsResolved': '所有冲突已解决',
   'notice.conflictResolved': '已解决 {path}：{resolution}',
+  'notice.mergeWritten': '冲突标记已写入 {path}，请编辑解决后再次同步。',
   'notice.logsCopied': '日志已复制到剪贴板',
   'notice.settingsExported': '设置已导出到 .obsidian/plugins/hybrid-git-sync/settings-export.json',
   'notice.settingsImported': '设置导入成功',
