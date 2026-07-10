@@ -170,6 +170,10 @@ export class ConflictResolver {
 
         case 'merge': {
           // Merge both versions with conflict markers (Git-style)
+          console.log('[ConflictResolver] Merge case entered for:', conflict.path);
+          console.log('[ConflictResolver] Local content length:', conflict.localContent.length);
+          console.log('[ConflictResolver] Remote content length:', conflict.remoteContent.length);
+
           const mergedContent = [
             '<<<<<<< LOCAL',
             conflict.localContent,
@@ -178,8 +182,10 @@ export class ConflictResolver {
             '>>>>>>> REMOTE',
           ].join('\n');
 
-          console.log('[ConflictResolver] Merging with conflict markers:', conflict.path);
+          console.log('[ConflictResolver] Merged content length:', mergedContent.length);
+          console.log('[ConflictResolver] Writing merged file...');
           await this.vault.adapter.write(conflict.path, mergedContent);
+          console.log('[ConflictResolver] Merged file written successfully');
 
           // Update sync state with merged content hash
           const mergedHash = await this.gitBlobSha1(mergedContent);

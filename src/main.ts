@@ -29,6 +29,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   settingsIO!: SettingsIO;
   private autoSyncInterval: number | null = null;
   private isResolvingConflicts = false;
+  private pauseFileChangeSync = false;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -392,6 +393,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   private async handleConflicts(conflicts: ConflictInfo[]): Promise<void> {
     // Set flag to prevent sync while resolving
     this.isResolvingConflicts = true;
+    this.pauseFileChangeSync = true;
     this.syncQueue.clear();
     this.statusBar.setState('conflict', `${conflicts.length} conflict(s)`);
 
@@ -407,6 +409,7 @@ export default class HybridGitSyncPlugin extends Plugin {
         // All conflicts resolved - save state to disk
         void stateManager.save().then(() => {
           this.isResolvingConflicts = false;
+          this.pauseFileChangeSync = false;
           this.showNotice(t('notice.conflictsResolved'));
           void this.performSync();
         });
@@ -483,6 +486,10 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private onFileChange(): void {
     if (!this.network.isOnline()) return;
+    if (this.pauseFileChangeSync) {
+      this.log('File change sync paused');
+      return;
+    }
     this.syncQueue.enqueue(() => void this.performSync());
   }
 
