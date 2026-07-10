@@ -181,8 +181,11 @@ export class ConflictResolver {
           await this.vault.adapter.write(conflict.path, mergedContent);
           console.log('[ConflictResolver] Merged file written:', conflict.path);
 
-          // Don't update sync state - file needs manual resolution
-          // The conflict will be re-detected until user removes conflict markers
+          // Update sync state with merged content hash
+          // This prevents re-detecting the same conflict
+          const mergedHash = await this.gitBlobSha1(mergedContent);
+          this.stateManager.setFileState(conflict.path, mergedHash);
+          console.log('[ConflictResolver] Updated sync state for:', conflict.path);
           break;
         }
 
