@@ -403,10 +403,12 @@ export default class HybridGitSyncPlugin extends Plugin {
     let current = 0;
     const processNext = () => {
       if (current >= conflicts.length) {
-        // All conflicts resolved
-        this.isResolvingConflicts = false;
-        this.showNotice('All conflicts resolved');
-        void this.performSync();
+        // All conflicts resolved - save state to disk
+        void stateManager.save().then(() => {
+          this.isResolvingConflicts = false;
+          this.showNotice(t('notice.conflictsResolved'));
+          void this.performSync();
+        });
         return;
       }
 
