@@ -339,22 +339,6 @@
   font-size: 12px;
 }
 
-/* Conflict Copy Buttons */
-.conflict-copy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 12px;
-  padding: 8px;
-  background: var(--background-secondary);
-  border-radius: 4px;
-}
-
-.conflict-copy-label {
-  font-size: 12px;
-  color: var(--text-muted);
-}
-
 /* Merge View */
 .merge-instructions {
   margin: 16px 0;

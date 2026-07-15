@@ -1,9 +1,10 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
-import { computeDiff, mergeWithConflictMarkers, type DiffResult, type DiffLine } from '../utils/diff';
+import { computeDiff, mergeWithoutMarkers, type DiffResult, type DiffLine } from '../utils/diff';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
+// 'merge' = auto-merge with conflict markers and save to file
 
 export interface ConflictInfo {
   path: string;
@@ -170,19 +171,29 @@ export class ConflictResolver {
         }
 
         case 'merge': {
-          // Merge both versions with conflict markers (Git-style, line-level)
-          console.log('[ConflictResolver] Merge case entered for:', conflict.path);
+          // Auto-merge: combine both versions without conflict markers
+          console.log('[ConflictResolver] Auto-merging:', conflict.path);
 
-          const mergedContent = mergeWithConflictMarkers(
+          const mergedContent = mergeWithoutMarkers(
             conflict.localContent,
             conflict.remoteContent
           );
 
+          // Save merged content locally
           await this.vault.adapter.write(conflict.path, mergedContent);
           console.log('[ConflictResolver] Merged file written:', conflict.path);
 
-          // Don't update sync state yet - wait for user to edit and confirm
-          // The state will be updated when user clicks "Done" in the modal
+          // Push merged content to remote
+          const remoteFile = await this.backend.getFile(conflict.path);
+          const currentSha = remoteFile?.sha;
+          const newSha = await this.backend.putFile(conflict.path, mergedContent, currentSha);
+          console.log('[ConflictResolver] Pushed to remote, new SHA:', newSha);
+
+          // Update sync state
+          const mergedHash = await this.gitBlobSha1(mergedContent);
+          this.stateManager.setFileState(conflict.path, mergedHash);
+          this.stateManager.setRemoteSha(conflict.path, newSha);
+          console.log('[ConflictResolver] Sync state updated for:', conflict.path);
           break;
         }
 

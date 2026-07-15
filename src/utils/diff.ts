@@ -128,6 +128,36 @@ export function hasConflictMarkers(content: string): boolean {
 }
 
 /**
+ * Merge two texts without conflict markers
+ * Simply combines both versions, keeping all content
+ */
+export function mergeWithoutMarkers(local: string, remote: string): string {
+  const changes: Change[] = diffLines(local, remote);
+  const result: string[] = [];
+
+  for (const change of changes) {
+    const lines = change.value.split('\n');
+    // Remove empty last element from split
+    if (lines[lines.length - 1] === '') {
+      lines.pop();
+    }
+
+    if (change.added) {
+      // Remote has lines that local doesn't - add them
+      result.push(...lines);
+    } else if (change.removed) {
+      // Local has lines that remote doesn't - keep them
+      result.push(...lines);
+    } else {
+      // Lines are the same - keep them
+      result.push(...lines);
+    }
+  }
+
+  return result.join('\n');
+}
+
+/**
  * Remove conflict markers and return resolved content
  * This is a simple implementation - in practice, users would edit manually
  */

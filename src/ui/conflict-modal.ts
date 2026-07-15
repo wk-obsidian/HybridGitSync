@@ -60,28 +60,11 @@ export class ConflictModal extends Modal {
       }
     }
 
-    // Copy buttons for manual merge
-    const copyEl = contentEl.createDiv('conflict-copy');
-    copyEl.createEl('span', { text: t('ui.copyForManualMerge'), cls: 'conflict-copy-label' });
-
-    const copyLocalBtn = copyEl.createEl('button', { text: t('ui.copyLocal') });
-    copyLocalBtn.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(this.conflict.localContent);
-      copyLocalBtn.setText(t('ui.copied'));
-      window.setTimeout(() => copyLocalBtn.setText(t('ui.copyLocal')), 2000);
-    });
-
-    const copyRemoteBtn = copyEl.createEl('button', { text: t('ui.copyRemote') });
-    copyRemoteBtn.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(this.conflict.remoteContent);
-      copyRemoteBtn.setText(t('ui.copied'));
-      window.setTimeout(() => copyRemoteBtn.setText(t('ui.copyRemote')), 2000);
-    });
-
     // Action buttons
     const buttonEl = contentEl.createDiv('conflict-buttons');
     this.createActionButton(buttonEl, t('ui.keepLocal'), 'local', 'btn-local');
     this.createActionButton(buttonEl, t('ui.keepRemote'), 'remote', 'btn-remote');
+    this.createActionButton(buttonEl, t('ui.keepAll'), 'merge', 'btn-merge');
     this.createActionButton(buttonEl, t('ui.skip'), 'skip', 'btn-skip');
   }
 
