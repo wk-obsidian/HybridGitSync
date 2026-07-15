@@ -10,6 +10,7 @@ import { HistoryView, HISTORY_VIEW_TYPE } from './ui/history-view';
 import { DiffView, DIFF_VIEW_TYPE } from './ui/diff-view';
 import { ChangesView, CHANGES_VIEW_TYPE } from './ui/changes-view';
 import { ConflictResolver, ConflictInfo } from './sync/conflict';
+import type { DiffResult } from './utils/diff';
 import { SyncQueue } from './sync/queue';
 import { NetworkStatus } from './utils/network';
 import { GitignoreRules } from './utils/gitignore';
@@ -508,7 +509,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       this.log('File change sync paused');
       return;
     }
-    this.syncQueue.enqueue(() => void this.performSync());
+    this.syncQueue.enqueue(() => this.performSync());
   }
 
   // ===== Commands =====

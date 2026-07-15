@@ -46,10 +46,14 @@ interface CommitInfo {
   message: string;
   author: string;
   date: string;
-  files: string[];
+  files?: string[];
 }
 
-interface CommitDetail extends CommitInfo {
+interface CommitDetail {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
   files: Array<{
     path: string;
     status: string;

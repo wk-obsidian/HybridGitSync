@@ -1,7 +1,8 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
-import { computeDiff, mergeWithoutMarkers, type DiffResult, type DiffLine } from '../utils/diff';
+import { computeDiff, mergeWithoutMarkers } from '../utils/diff';
+import type { DiffResult, DiffLine } from '../utils/diff';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
 // 'merge' = auto-merge with conflict markers and save to file
@@ -232,18 +233,4 @@ export class ConflictResolver {
       modified: 0, // diff library doesn't distinguish modified from added+removed
     };
   }
-}
-
-export interface DiffLine {
-  type: 'added' | 'removed' | 'modified' | 'unchanged';
-  line: string;
-  lineNum: number;
-  newLine?: string;
-}
-
-export interface DiffResult {
-  changes: DiffLine[];
-  added: number;
-  removed: number;
-  modified: number;
 }

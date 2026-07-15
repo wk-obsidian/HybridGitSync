@@ -1,5 +1,6 @@
 import { App, Modal } from 'obsidian';
-import { ConflictInfo, ConflictResolution, DiffResult } from '../sync/conflict';
+import { ConflictInfo, ConflictResolution } from '../sync/conflict';
+import type { DiffResult } from '../utils/diff';
 import { t } from '../i18n';
 import { getErrorMessage } from '../utils/error';
 

@@ -1,4 +1,4 @@
-import { App, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
 import { requestDeviceCode, pollForAccessToken, listRepos } from './auth/github-oauth';

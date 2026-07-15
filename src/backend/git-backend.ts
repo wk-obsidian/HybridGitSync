@@ -267,7 +267,7 @@ export class GitBackend extends SyncBackend {
   private exec(args: string): Promise<string> {
     return new Promise((resolve, reject) => {
       // Build environment with token for authentication
-      const env: Record<string, string> = { ...process.env };
+      const env: Record<string, string | undefined> = { ...process.env };
       if (this.token) {
         // Use GIT_ASKPASS to provide credentials non-interactively
         // This tells git to use our token when it asks for credentials
