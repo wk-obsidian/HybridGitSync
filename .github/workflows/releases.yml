@@ -1,28 +1,55 @@
-name: Release Obsidian Plugin
+name: Build obsidian plugin
 
 on:
-  push:
-    tags: ['*']
+    push:
+        tags:
+            - "*"
+
+env:
+    PLUGIN_NAME: hybrid-git-sync
+
+permissions:
+    id-token: write
+    contents: write
+    attestations: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    env:
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24' 
-          cache: 'npm'
-      - run: npm ci
-      - run: npm run build
-      - run: cp src/ui/styles.css styles.css
-      - name: Create Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "${{ github.ref_name }}" \
-            --draft \
-            main.js manifest.json styles.css
+    build:
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v6
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: "20"
+                  cache: "npm"
+            - name: Build
+              id: build
+              run: |
+                  npm ci
+                  npm run build
+                  cp src/ui/styles.css styles.css
+                  mkdir ${{ env.PLUGIN_NAME }}
+                  cp main.js manifest.json styles.css ${{ env.PLUGIN_NAME }}
+                  zip -r ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip ${{ env.PLUGIN_NAME }}
+            - name: Attest build provenance
+              uses: actions/attest@v4
+              with:
+                  subject-path: |
+                      main.js
+                      manifest.json
+                      styles.css
+                      ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip
+            - name: Create Release
+              id: create_release
+              uses: softprops/action-gh-release@v2
+              with:
+                  tag_name: ${{ github.ref }}
+                  name: ${{ github.ref_name }}
+                  generate_release_notes: true
+                  draft: false
+                  prerelease: false
+                  files: |
+                      main.js
+                      manifest.json
+                      styles.css
+                      ${{ env.PLUGIN_NAME }}-${{ github.ref_name }}.zip
