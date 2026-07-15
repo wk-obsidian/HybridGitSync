@@ -6,5 +6,6 @@
   "description": "Cross-platform Git sync plugin. Desktop uses native git, mobile uses GitHub/GitLab API.",
   "author": "walkskyer",
   "authorUrl": "",
-  "isDesktopOnly": false
+  "isDesktopOnly": false,
+  "fundingUrl": "https://ko-fi.com/walkskyer"
 }
