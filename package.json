@@ -1,6 +1,6 @@
 {
   "name": "hybrid-git-sync",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Cross-platform Git sync for Obsidian (Desktop: native git, Mobile: GitHub/GitLab API)",
   "main": "main.js",
   "scripts": {
