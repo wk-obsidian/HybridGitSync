@@ -6,43 +6,25 @@ A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and Gi
 
 ## Features
 
-### Core Sync
-- ✅ Bidirectional sync (push/pull)
-- ✅ Incremental sync (only transfer changed files)
-- ✅ Parallel transfer (up to 3 concurrent)
-- ✅ Auto sync (timer/file change trigger)
-- ✅ Conflict detection and resolution
-- ✅ .gitignore support (auto-create with localized comments)
-
-### Authentication
-- ✅ GitHub OAuth (one-click authorization)
-- ✅ Personal Access Token support
-- ✅ Repository selection after authorization
-
-### Platform Support
-- ✅ Windows / macOS / Linux (Git mode)
-- ✅ Android / iOS (API mode)
-- ✅ Auto-detect backend (Git installed + vault is repo → Git mode)
+- **Native + API Hybrid Mode** — Desktop supports both local Git and GitHub API; mobile uses GitHub API to bypass filesystem limits
+- **Cross-Platform Consistency** — Unified experience on Windows, macOS, Android, and iOS
+- **Auto / Incremental Sync** — Scheduled or on-change auto-push with smart conflict resolution
+- **Flexible Authentication** — GitHub OAuth (one-click) or Personal Access Token
 
 ### User Interface
-- ✅ Status bar with sync state
-- ✅ Ribbon icons for quick access
-- ✅ Commit history view
-- ✅ Diff view with line-by-line comparison
-- ✅ Changed files panel
-- ✅ Conflict resolution modal
-
-### Multi-language
-- ✅ English
-- ✅ Chinese (中文)
-- ✅ Auto-detect from Obsidian settings
+- Status bar with sync state
+- Ribbon icons for quick access
+- Commit history view
+- Diff view with line-by-line comparison
+- Changed files panel
+- Conflict resolution modal
 
 ### Utilities
-- ✅ Settings import/export
-- ✅ Log viewer and export
-- ✅ Sync state management
-- ✅ Network status detection
-- ✅ Offline queue
+- Settings import/export
+- Log viewer and export
+- Sync state management
+- Network status detection
+- Offline queue
 
 ## Installation
 
@@ -52,7 +34,7 @@ A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and Gi
 3. Install and enable
 
 ### Manual
-1. Download `hybrid-git-sync-1.0.4.zip`
+1. Download the latest release
 2. Extract to `.obsidian/plugins/hybrid-git-sync/`
 3. Enable the plugin in Settings → Community Plugins
 
