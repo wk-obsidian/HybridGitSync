@@ -22,3 +22,6 @@ hybrid-git-sync*
 # Claude
 .claude
 CLAUDE.md
+
+# Local development
+dev-local/

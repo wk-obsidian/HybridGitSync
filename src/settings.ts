@@ -3,6 +3,7 @@ import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
 import { requestDeviceCode, pollForAccessToken, listRepos } from './auth/github-oauth';
 import { OAuthModal } from './auth/oauth-modal';
+import { GitignoreRules } from './utils/gitignore';
 
 export interface PluginSettings {
   // Backend
@@ -83,6 +84,7 @@ export class SettingsTab extends PluginSettingTab {
     this.renderRemoteSettings(containerEl);
     this.renderAutoSyncSettings(containerEl);
     this.renderBehaviorSettings(containerEl);
+    this.renderGitignoreSettings(containerEl);
     this.renderAdvancedSettings(containerEl);
   }
 
@@ -349,6 +351,82 @@ export class SettingsTab extends PluginSettingTab {
           this.plugin.settings.debug = value;
           await this.plugin.saveSettings();
         }));
+  }
+
+  private renderGitignoreSettings(el: HTMLElement): void {
+    new Setting(el).setName(t('settings.gitignore')).setHeading();
+
+    // Description
+    new Setting(el)
+      .setName(t('settings.gitignoreRules'))
+      .setDesc(t('settings.gitignoreRulesDesc'));
+
+    // Create container for textarea and buttons
+    const containerEl = el.createEl('div');
+    containerEl.style.marginTop = '8px';
+    containerEl.style.marginBottom = '16px';
+
+    // Create textarea for .gitignore content
+    const textareaEl = containerEl.createEl('textarea');
+    textareaEl.addClass('settings-gitignore-textarea');
+    textareaEl.style.width = '100%';
+    textareaEl.style.height = '200px';
+    textareaEl.style.fontFamily = 'monospace';
+    textareaEl.style.fontSize = '12px';
+    textareaEl.style.resize = 'vertical';
+    textareaEl.style.display = 'block';
+
+    // Load current .gitignore content
+    this.loadGitignoreContent(textareaEl);
+
+    // Buttons container
+    const buttonEl = containerEl.createEl('div');
+    buttonEl.style.marginTop = '8px';
+    buttonEl.style.display = 'flex';
+    buttonEl.style.gap = '8px';
+
+    // Save button
+    const saveBtn = buttonEl.createEl('button');
+    saveBtn.textContent = t('settings.gitignoreSave');
+    saveBtn.addClass('mod-cta');
+    saveBtn.onclick = async () => {
+      await this.saveGitignoreContent(textareaEl.value);
+    };
+
+    // Reset button
+    const resetBtn = buttonEl.createEl('button');
+    resetBtn.textContent = t('settings.gitignoreReset');
+    resetBtn.onclick = async () => {
+      await this.resetGitignoreContent(textareaEl);
+    };
+  }
+
+  private async loadGitignoreContent(textarea: HTMLTextAreaElement): Promise<void> {
+    try {
+      const content = await this.plugin.app.vault.adapter.read('.gitignore');
+      textarea.value = content;
+    } catch {
+      textarea.value = '# .gitignore not found';
+    }
+  }
+
+  private async saveGitignoreContent(content: string): Promise<void> {
+    try {
+      await this.plugin.app.vault.adapter.write('.gitignore', content);
+      // Reload gitignore rules
+      this.plugin.gitignore = new GitignoreRules();
+      this.plugin.gitignore.addRules(content);
+      new Notice(t('notice.gitignoreSaved'));
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to save .gitignore:', error);
+      new Notice(t('notice.gitignoreSaveFailed'));
+    }
+  }
+
+  private async resetGitignoreContent(textarea: HTMLTextAreaElement): Promise<void> {
+    const defaultContent = this.plugin.gitignore.getDefaultContent();
+    textarea.value = defaultContent;
+    await this.saveGitignoreContent(defaultContent);
   }
 
   private async startOAuthFlow(): Promise<void> {

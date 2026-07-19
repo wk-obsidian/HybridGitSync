@@ -648,6 +648,12 @@ export default class HybridGitSyncPlugin extends Plugin {
       name: 'Clear sync state',
       callback: () => void this.clearSyncState(),
     });
+
+    this.addCommand({
+      id: 'untrack-ignored-files',
+      name: 'Untrack ignored files',
+      callback: () => void this.untrackIgnoredFiles(),
+    });
   }
 
   // ===== Logs =====
@@ -685,6 +691,66 @@ export default class HybridGitSyncPlugin extends Plugin {
       await stateManager.save();
       this.showNotice(t('notice.syncStateCleared'));
     }
+  }
+
+  // ===== Untrack Ignored Files =====
+
+  private async untrackIgnoredFiles(): Promise<void> {
+    if (!(this.backend instanceof GitBackend)) {
+      this.showNotice(t('notice.untrackGitOnly'));
+      return;
+    }
+
+    try {
+      // Get list of tracked files
+      const gitBackend = this.backend as GitBackend;
+      const trackedFiles = await this.getTrackedFiles(gitBackend);
+
+      // Filter out ignored files
+      const ignoredTrackedFiles = trackedFiles.filter(file => this.gitignore.shouldIgnore(file));
+
+      if (ignoredTrackedFiles.length === 0) {
+        this.showNotice(t('notice.noIgnoredTrackedFiles'));
+        return;
+      }
+
+      // Untrack the files
+      for (const file of ignoredTrackedFiles) {
+        await this.untrackFile(gitBackend, file);
+      }
+
+      this.showNotice(t('notice.untrackedFiles', { count: ignoredTrackedFiles.length }));
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to untrack ignored files:', error);
+      this.showNotice(t('notice.untrackFailed'));
+    }
+  }
+
+  private async getTrackedFiles(gitBackend: GitBackend): Promise<string[]> {
+    try {
+      // Use git ls-files to get list of tracked files
+      const output = await this.execGitCommand(gitBackend, 'ls-files');
+      return output.split('\n').filter(file => file.trim() !== '');
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to get tracked files:', error);
+      return [];
+    }
+  }
+
+  private async untrackFile(gitBackend: GitBackend, file: string): Promise<void> {
+    try {
+      // Use git rm --cached to untrack the file
+      await this.execGitCommand(gitBackend, `rm --cached "${file}"`);
+    } catch (error) {
+      console.error(`[HybridGitSync] Failed to untrack file ${file}:`, error);
+    }
+  }
+
+  private async execGitCommand(gitBackend: GitBackend, command: string): Promise<string> {
+    return new Promise((resolve, reject) => {
+      // Access the private exec method via any cast
+      (gitBackend as any).exec(command).then(resolve).catch(reject);
+    });
   }
 
   // ===== Version Restore =====

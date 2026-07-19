@@ -43,7 +43,14 @@ export class GitignoreRules {
    * Get default .gitignore content with localized comments
    */
   getDefaultContent(): string {
-    return `# ${t('gitignore.obsidianDeviceFiles')}
+    return `# ${t('gitignore.ignoreDotfiles')}
+.*
+
+# ${t('gitignore.keepDotfiles')}
+!.obsidian/
+!.gitignore
+
+# ${t('gitignore.obsidianDeviceFiles')}
 .obsidian/workspace.json
 .obsidian/workspace-mobile.json
 
