@@ -161,27 +161,38 @@ export class SettingsTab extends PluginSettingTab {
 
     // Repo selection (only when connected to GitHub)
     if (this.plugin.settings.apiProvider === 'github' && this.plugin.settings.apiToken) {
-      new Setting(el)
+      const repoSetting = new Setting(el)
         .setName(t('settings.selectRepo'))
-        .setDesc(t('settings.selectRepoDesc'))
-        .addDropdown(cb => {
-          cb.addOption('', t('settings.selectRepoPlaceholder'));
-          // Load repos asynchronously
-          this.loadRepos(cb);
-          cb.onChange(async (value) => {
-            if (value) {
-              this.plugin.settings.remoteUrl = value;
-              // Auto-set branch from repo
-              const repos = await listRepos(this.plugin.settings.apiToken);
-              const repo = repos.find(r => r.fullName === value);
-              if (repo) {
-                this.plugin.settings.branch = repo.defaultBranch;
-              }
-              await this.plugin.saveSettings();
-              this.display();
-            }
-          });
-        });
+        .setDesc(t('settings.selectRepoDesc'));
+
+      // Create dropdown on its own line
+      const dropdownEl = repoSetting.settingEl.createEl('select');
+      dropdownEl.style.width = '100%';
+      dropdownEl.style.marginTop = '8px';
+      dropdownEl.style.display = 'block';
+
+      // Add placeholder option
+      const placeholderOption = dropdownEl.createEl('option');
+      placeholderOption.value = '';
+      placeholderOption.textContent = t('settings.selectRepoPlaceholder');
+
+      // Load repos asynchronously
+      this.loadReposToElement(dropdownEl);
+
+      dropdownEl.addEventListener('change', async () => {
+        const value = dropdownEl.value;
+        if (value) {
+          this.plugin.settings.remoteUrl = value;
+          // Auto-set branch from repo
+          const repos = await listRepos(this.plugin.settings.apiToken);
+          const repo = repos.find(r => r.fullName === value);
+          if (repo) {
+            this.plugin.settings.branch = repo.defaultBranch;
+          }
+          await this.plugin.saveSettings();
+          this.display();
+        }
+      });
     }
 
     // Manual remote URL input
@@ -468,6 +479,23 @@ export class SettingsTab extends PluginSettingTab {
       // Set current value if exists
       if (this.plugin.settings.remoteUrl) {
         dropdown.setValue(this.plugin.settings.remoteUrl);
+      }
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to load repos:', error);
+    }
+  }
+
+  private async loadReposToElement(selectEl: HTMLSelectElement): Promise<void> {
+    try {
+      const repos = await listRepos(this.plugin.settings.apiToken);
+      for (const repo of repos) {
+        const option = selectEl.createEl('option');
+        option.value = repo.fullName;
+        option.textContent = repo.private ? `🔒 ${repo.fullName}` : repo.fullName;
+      }
+      // Set current value if exists
+      if (this.plugin.settings.remoteUrl) {
+        selectEl.value = this.plugin.settings.remoteUrl;
       }
     } catch (error) {
       console.error('[HybridGitSync] Failed to load repos:', error);
