@@ -1,6 +1,6 @@
 # Hybrid Git Sync
 
-[中文文档](README_ZH.md)
+English｜[中文](https://github.com/wk-obsidian/HybridGitSync/blob/main/README_ZH.md)
 
 A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and GitHub API on mobile.
 

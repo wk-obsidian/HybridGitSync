@@ -1,6 +1,6 @@
 # Hybrid Git Sync
 
-[English](README.md)
+[English](https://github.com/wk-obsidian/HybridGitSync/blob/main/README.md)｜[中文](https://github.com/wk-obsidian/HybridGitSync/blob/main/README_ZH.md)
 
 跨平台 Obsidian Git 同步插件。桌面端使用原生 Git，移动端使用 GitHub API。
 
