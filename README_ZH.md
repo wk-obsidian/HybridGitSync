@@ -2,142 +2,57 @@
 
 [English](https://github.com/wk-obsidian/HybridGitSync/blob/main/README.md)｜[中文](https://github.com/wk-obsidian/HybridGitSync/blob/main/README_ZH.md)
 
-跨平台 Obsidian Git 同步插件。桌面端使用原生 Git，移动端使用 GitHub API。
 
-## 功能特性
+> 🚀 **专为 Obsidian 打造的跨平台自适应 Git 同步解决方案。**  
+> 桌面端享受原生 Git 的高效稳健性能，移动端基于轻量化、免依赖的 Git 托管商 API。
 
-- **原生 + API 混合模式** — 桌面端支持本地 Git 和 API 两种方式，移动端使用 GitHub API 突破文件系统限制
-- **全平台一致性** — Windows、macOS、Android、iOS 体验统一
-- **自动 / 增量同步** — 定时或修改后自动推送，支持智能冲突解决
-- **灵活认证** — GitHub OAuth（一键授权）或 Personal Access Token
+---
 
-### 用户界面
-- 状态栏显示同步状态
-- Ribbon 图标快速操作
-- 提交历史视图
-- Diff 视图（逐行对比）
-- 变更文件面板
-- 冲突解决弹窗
+## 🌟 设计理念与核心优势
 
-### 工具功能
-- 设置导入导出
-- 日志查看与导出
-- 同步状态管理
-- 网络状态检测
-- 离线队列
+由于不同操作系统的底层限制与网络环境差异，在多端使用 Git 管理 Obsidian 笔记往往需要不同的同步策略。**Hybrid Git Sync** 采用创新的**自适应智能引擎**，旨在为电脑端和手机端搭建一座平滑、无缝的同步桥梁。
 
-## 安装
+本插件不会一刀切地在所有平台上运行相同的底层逻辑，而是根据您当前的使用环境，智能分配同步工作负载：
 
-### 从社区插件安装
-1. 打开 Settings → Community Plugins
-2. 搜索 "Hybrid Git Sync"
-3. 安装并启用
+* **💻 桌面端 (Windows/Mac/Linux)：** 直接调用您电脑本机的 **Native Git 客户端**。这保障了大文件传输、海量历史版本管理时的高效性与极佳稳定性。
+* **📱 移动端 (iOS/Android)：** 自动无缝切换为 **GitHub / GitLab / Gitea REST API** 方案。直接通过轻量化的 HTTPS 请求读写云端仓库，彻底免去了在手机端折腾本地 Git 二进制运行环境的烦恼。
 
-### 手动安装
-1. 下载最新版本
-2. 解压到 `.obsidian/plugins/hybrid-git-sync/`
-3. 在 Settings → Community Plugins 中启用
+---
 
-## 快速开始
+## ✨ 核心特性
 
-### GitHub（推荐）
+* 🔄 **自适应混合引擎：** 电脑端充分发挥本地硬件与原生命令的性能，手机端切换为干净、省电且轻量的 API 通信，两端各取所长。
+* 🔒 **隐私与安全至上：** 您的个人访问令牌（PAT Token）完全保存在 Obsidian 本地的加密存储空间中，绝不上传至任何第三方服务器或中转节点。
+* ⚡ **冲突防范机制：** 内置智能同步和文件合并逻辑，在多设备同时编辑时，最大程度保护您的笔记内容不被意外覆盖。
+* 💰 **100% 开源与免费：** 为跨平台用户提供一套完全免费、自主可控的知识库全自动备份与多端同步选择。
 
-1. 打开插件设置
-2. 点击 **连接** 按钮，授权 GitHub
-3. 从下拉列表选择仓库
-4. 完成！插件会自动同步
+---
 
-### Git 模式（桌面端）
+## 📦 安装方式
 
-1. 确保系统已安装 Git
-2. 在 vault 目录初始化 Git：`git init`
-3. 配置远程仓库：`git remote add origin <url>`
-4. 插件会自动使用系统 Git
+1. 打开 Obsidian，进入 **设置 (Settings)** -> **社区插件 (Community Plugins)**。
+2. 点击 **浏览 (Browse)**，在搜索框输入 `Hybrid Git Sync`。
+3. 点击 **安装 (Install)**，随后点击 **启用 (Enable)** 激活插件。
 
-### API 模式（移动端）
+---
 
-1. 在 GitHub 创建仓库
-2. 生成 Personal Access Token（需要 `repo` 权限）
-3. 在插件设置中配置：
-   - API 提供商：GitHub
-   - API Token：你的 Token
-   - 远程 URL：`用户名/仓库名`
+## ⚙️ 极简配置指南
 
-## 后端模式
+只需不到 3 分钟即可完成全平台配置：
 
-| 模式 | 说明 | 使用场景 |
-|---|---|---|
-| 自动（推荐） | 根据 Git 可用性自动检测 | 默认 |
-| Git | 使用系统 Git | 桌面端已安装 Git |
-| API | 使用 GitHub/GitLab/Gitea API | 移动端或无 Git |
+1. **仓库准备：** 将您在电脑端的笔记文件夹初始化为 Git 仓库，并推送到您的托管平台（如 GitHub、GitLab 或 Gitea）。
+2. **生成 Token：** 前往您的 Git 托管平台设置页面，生成一个拥有 `repo` 读写权限的 **个人访问令牌 (Personal Access Token)**。
+3. **手机端配置：** 打开手机端 Obsidian 的本插件设置，填入您的仓库 HTTPS 地址和刚刚生成的 Token。点击 **同步 (Sync)** 即可开启全平台无缝同步体验！
 
-## 命令
+---
 
-| 命令 | 说明 |
-|---|---|
-| Sync now | 立即同步 |
-| Pull | 仅拉取 |
-| Push | 仅推送 |
-| View sync status | 查看同步状态 |
-| View commit history | 查看提交历史 |
-| View changes | 查看变更文件 |
-| Diff current file | 对比当前文件 |
-| Restore file from remote | 从远程恢复文件 |
-| Switch branch | 查看/切换分支 |
-| Toggle auto sync | 开关自动同步 |
-| View logs | 查看日志（复制到剪贴板） |
-| Export settings | 导出设置 |
-| Import settings | 导入设置 |
-| Clear sync state | 清除同步状态 |
+## 🤝 反馈与贡献
 
-## 忽略规则
+作为一个刚刚发布的新项目，您的每一个反馈对它的成长都至关重要！如果您在安装或使用过程中遇到任何问题，欢迎通过以下方式参与：
 
-插件会自动读取 `.gitignore` 文件。如果没有，会自动创建一个包含以下规则：
+* 如果遇到 Bug 或有新的功能想法，请随时提交 **Issue**，或在项目的 **Discussions** 讨论区畅所欲言。
+* 如果这个插件成功简化了您的跨平台工作流，欢迎为本项目点一个 ⭐ **Star**，您的支持能让更多有同样需求的人发现它！
 
-```gitignore
-# Obsidian - 设备相关文件
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
-
-# 插件目录（代码、配置、依赖全部忽略）
-.obsidian/plugins/
-
-# 缓存
-.obsidian/cache/
-
-# 回收站
-.trash/
-
-# 操作系统文件
-.DS_Store
-Thumbs.db
-
-# 临时文件
-*.tmp
-*.bak
-*.swp
-*~
-```
-
-## 已知限制
-
-- API 模式不支持 SSH 认证
-- API 模式单文件限制 50MB
-- 移动端无法后台持续同步
-- GitLab/Gitea 支持计划中
-
-## 开发
-
-```bash
-# 安装依赖
-npm install
-
-# 开发模式
-npm run dev
-
-# 构建
-npm run build
-```
 
 ## 许可证
 

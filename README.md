@@ -1,146 +1,61 @@
-# Hybrid Git Sync
+# Hybrid Git Sync for Obsidian
 
-English｜[中文](https://github.com/wk-obsidian/HybridGitSync/blob/main/README_ZH.md)
+[English](#english) | [中文说明](#中文说明)
 
-A cross-platform Git sync plugin for Obsidian. Uses native Git on desktop and GitHub API on mobile.
+> 🚀 **An adaptive, cross-platform Git synchronization solution for Obsidian.**  
+> Enjoy high-performance Native Git execution on Desktop alongside a lightweight, zero-dependency Git Provider API on Mobile.
 
-## Features
+---
 
-- **Native + API Hybrid Mode** — Desktop supports both local Git and GitHub API; mobile uses GitHub API to bypass filesystem limits
-- **Cross-Platform Consistency** — Unified experience on Windows, macOS, Android, and iOS
-- **Auto / Incremental Sync** — Scheduled or on-change auto-push with smart conflict resolution
-- **Flexible Authentication** — GitHub OAuth (one-click) or Personal Access Token
+## 🌟 Introduction & Design Philosophy
 
-### User Interface
-- Status bar with sync state
-- Ribbon icons for quick access
-- Commit history view
-- Diff view with line-by-line comparison
-- Changed files panel
-- Conflict resolution modal
+Managing an Obsidian vault with Git across different operating systems usually requires distinct synchronization strategies due to platform-specific constraints. **Hybrid Git Sync** bridges this gap seamlessly by implementing an **Adaptive Sync Engine**.
 
-### Utilities
-- Settings import/export
-- Log viewer and export
-- Sync state management
-- Network status detection
-- Offline queue
+Instead of applying a single approach to all environments, this plugin intelligently splits the synchronization workload based on the device you are currently using:
 
-## Installation
+* **💻 On Desktop (Windows/Mac/Linux):** It invokes your local **Native Git client**. This guarantees maximum execution speed, reliability, and full support for complex repository histories or large assets.
+* **📱 On Mobile (iOS/Android):** It bypasses mobile OS limitations by interacting directly with cloud **REST APIs (GitHub / GitLab / Gitea)**. It reads and writes changes via lightweight HTTPS requests without requiring any local Git binary environments on your phone.
 
-### From Community Plugins
-1. Open Settings → Community Plugins
-2. Search for "Hybrid Git Sync"
-3. Install and enable
+---
 
-### Manual
-1. Download the latest release
-2. Extract to `.obsidian/plugins/hybrid-git-sync/`
-3. Enable the plugin in Settings → Community Plugins
+## ✨ Key Features
 
-## Quick Start
+* 🔄 **Adaptive Hybrid Engine:** Runs full native Git commands on your PC and shifts to clean, memory-efficient API requests on your mobile devices.
+* 🔒 **Privacy Centric:** Your Personal Access Tokens (PAT) are stored locally within Obsidian's secure configuration storage. No data ever leaves your device or touches intermediate servers.
+* ⚡ **Conflict Resolution:** Built-in smart synchronization logic helps track updates, reducing the risk of overwriting files during simultaneous multi-device editing.
+* 💰 **100% Free & Open Source:** A reliable, customizable, and fully self-hosted alternative for universal knowledge base backups.
 
-### GitHub (Recommended)
+---
 
-1. Open plugin settings
-2. Click **Connect** to authorize with GitHub
-3. Select a repository from the dropdown
-4. Done! The plugin will auto-sync
+## 📦 Installation
 
-### Git Mode (Desktop)
+1. Inside Obsidian, navigate to **Settings** -> **Community Plugins**.
+2. Click **Browse** and search for `Hybrid Git Sync`.
+3. Click **Install**, then toggle on **Enable**.
 
-1. Ensure Git is installed on your system
-2. Initialize Git in vault directory: `git init`
-3. Configure remote: `git remote add origin <url>`
-4. The plugin will automatically use system Git
+---
 
-### API Mode (Mobile)
+## ⚙️ Quick Setup Guide
 
-1. Create a repository on GitHub
-2. Generate a Personal Access Token (requires `repo` scope)
-3. Configure in plugin settings:
-   - API Provider: GitHub
-   - API Token: your token
-   - Remote URL: `username/repo`
+Setting up Hybrid Git Sync takes less than 3 minutes:
 
-## Backend Modes
+1. **Repository Setup:** Initialize your Obsidian vault as a Git repository on your desktop and push it to your hosting platform (GitHub, GitLab, or Gitea).
+2. **Generate Token:** Navigate to your Git provider's settings and create a **Personal Access Token (PAT)** with full `repo` read/write scopes.
+3. **Mobile Configuration:** Open the plugin settings on your mobile device, enter your Repository URL and the generated Token. Tap **Sync** to initiate your first transfer!
 
-| Mode | Description | Use Case |
-|---|---|---|
-| Auto (recommended) | Auto-detect based on Git availability | Default |
-| Git | Use system Git | Desktop with Git installed |
-| API | Use GitHub/GitLab/Gitea API | Mobile or no Git |
+---
 
-## Commands
+## 🤝 Feedback & Contributing
 
-| Command | Description |
-|---|---|
-| Sync now | Sync immediately |
-| Pull | Pull only |
-| Push | Push only |
-| View sync status | View sync status |
-| View commit history | View commit history |
-| View changes | View changed files |
-| Diff current file | Diff current file |
-| Restore file from remote | Restore file from remote |
-| Switch branch | View/switch branch |
-| Toggle auto sync | Toggle auto sync |
-| View logs | View logs (copy to clipboard) |
-| Export settings | Export settings |
-| Import settings | Import settings |
-| Clear sync state | Clear sync state |
+As this is a newly released plugin, your feedback is incredibly valuable! If you encounter any bugs, have feature requests, or want to support the project:
 
-## Ignore Rules
+* Please open an **Issue** or join the discussion in the **Discussions** tab.
+* If this plugin helps streamline your cross-platform workflow, consider dropping a ⭐ **Star** to help others discover it!
 
-The plugin automatically reads `.gitignore` file. If none exists, it creates one with these rules:
-
-```gitignore
-# Obsidian - Device-specific files
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
-
-# Plugins directory (code, config, dependencies)
-.obsidian/plugins/
-
-# Cache
-.obsidian/cache/
-
-# Trash
-.trash/
-
-# OS files
-.DS_Store
-Thumbs.db
-
-# Temp files
-*.tmp
-*.bak
-*.swp
-*~
-```
-
-## Known Limitations
-
-- API mode does not support SSH authentication
-- API mode single file limit is 50MB
-- Mobile cannot run continuous background sync
-- GitLab/Gitea support planned for future release
-
-## Development
-
-```bash
-# Install dependencies
-npm install
-
-# Development mode
-npm run dev
-
-# Build
-npm run build
-```
 
 ## License
 
+MIT
 
 ## ☕ Support
 
