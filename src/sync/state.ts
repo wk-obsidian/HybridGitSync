@@ -1,4 +1,5 @@
 import { Vault } from 'obsidian';
+import { Logger, LogLevel } from '../utils/logger';
 
 const STATE_FILE_NAME = 'plugins/hybrid-git-sync/.sync-state.json';
 
@@ -17,17 +18,19 @@ export class SyncStateManager {
   private state: SyncState;
   private debug: boolean;
   private stateFile: string;
+  private logger: Logger;
 
   constructor(vault: Vault, debug: boolean = false) {
     this.stateFile = `${vault.configDir}/${STATE_FILE_NAME}`;
     this.vault = vault;
     this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
     this.debug = debug;
+    this.logger = new Logger('SyncState', debug ? LogLevel.DEBUG : LogLevel.INFO);
   }
 
   private log(...args: unknown[]): void {
     if (this.debug) {
-      console.log('[SyncState]', ...args);
+      this.logger.info(...args);
     }
   }
 

@@ -1,8 +1,9 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
+import { Logger, LogLevel } from '../utils/logger';
 import { computeDiff, mergeWithoutMarkers } from '../utils/diff';
-import type { DiffResult, DiffLine } from '../utils/diff';
+import type { DiffResult } from '../utils/diff';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
 // 'merge' = auto-merge with conflict markers and save to file
@@ -22,11 +23,13 @@ export class ConflictResolver {
   private vault: Vault;
   private backend: ApiBackend;
   private stateManager: SyncStateManager;
+  private logger: Logger;
 
   constructor(vault: Vault, backend: ApiBackend, stateManager: SyncStateManager) {
     this.vault = vault;
     this.backend = backend;
     this.stateManager = stateManager;
+    this.logger = new Logger('ConflictResolver');
   }
 
   /**
@@ -92,7 +95,7 @@ export class ConflictResolver {
    * Resolve a conflict with the given strategy
    */
   async resolve(conflict: ConflictInfo, resolution: ConflictResolution): Promise<void> {
-    console.log('[ConflictResolver] Resolving:', conflict.path, 'with strategy:', resolution);
+    this.logger.info('Resolving:', conflict.path, 'with strategy:', resolution);
 
     try {
       switch (resolution) {
@@ -105,23 +108,23 @@ export class ConflictResolver {
           // Try to use cached SHA first
           const cachedSha = this.stateManager.getRemoteSha(conflict.path);
           if (cachedSha) {
-            console.log('[ConflictResolver] Using cached remote SHA:', cachedSha);
+            this.logger.info('Using cached remote SHA:', cachedSha);
             currentSha = cachedSha;
           }
 
           while (retries > 0 && !success) {
             // If no cached SHA, fetch from remote
             if (!currentSha) {
-              console.log('[ConflictResolver] Fetching remote file SHA... (retries:', retries, ')');
+              this.logger.info('Fetching remote file SHA... (retries:', retries, ')');
               const remoteFile = await this.backend.getFile(conflict.path);
               currentSha = remoteFile?.sha;
-              console.log('[ConflictResolver] Current remote SHA:', currentSha);
+              this.logger.info('Current remote SHA:', currentSha);
             }
 
-            console.log('[ConflictResolver] Pushing local content to remote...');
+            this.logger.info('Pushing local content to remote...');
             try {
               const newSha = await this.backend.putFile(conflict.path, conflict.localContent, currentSha);
-              console.log('[ConflictResolver] Pushed, new SHA:', newSha);
+              this.logger.info('Pushed, new SHA:', newSha);
               // Update sync state with local content hash
               const localHash = await this.gitBlobSha1(conflict.localContent);
               this.stateManager.setFileState(conflict.path, localHash);
@@ -132,7 +135,7 @@ export class ConflictResolver {
               retries--;
               currentSha = undefined; // Reset SHA to force re-fetch
               if (retries === 0) throw e;
-              console.warn('[ConflictResolver] Retry due to conflict...');
+              this.logger.warn('Retry due to conflict...');
               await new Promise(r => window.setTimeout(r, 1000)); // Wait 1 second
             }
           }
@@ -141,7 +144,7 @@ export class ConflictResolver {
 
         case 'remote': {
           // Keep remote version, write to local
-          console.log('[ConflictResolver] Writing remote content to local...');
+          this.logger.info('Writing remote content to local...');
           await this.vault.adapter.write(conflict.path, conflict.remoteContent);
           // Update sync state with remote content hash
           const remoteHash = await this.gitBlobSha1(conflict.remoteContent);
@@ -159,7 +162,7 @@ export class ConflictResolver {
           const localPath = `${baseName}.local${extension}`;
           const remotePath = `${baseName}.remote${extension}`;
 
-          console.log('[ConflictResolver] Saving both versions:', localPath, remotePath);
+          this.logger.info('Saving both versions:', localPath, remotePath);
           await this.vault.adapter.write(localPath, conflict.localContent);
           await this.vault.adapter.write(remotePath, conflict.remoteContent);
           // Update sync state for both files
@@ -173,7 +176,7 @@ export class ConflictResolver {
 
         case 'merge': {
           // Auto-merge: combine both versions without conflict markers
-          console.log('[ConflictResolver] Auto-merging:', conflict.path);
+          this.logger.info('Auto-merging:', conflict.path);
 
           const mergedContent = mergeWithoutMarkers(
             conflict.localContent,
@@ -182,34 +185,34 @@ export class ConflictResolver {
 
           // Save merged content locally
           await this.vault.adapter.write(conflict.path, mergedContent);
-          console.log('[ConflictResolver] Merged file written:', conflict.path);
+          this.logger.info('Merged file written:', conflict.path);
 
           // Push merged content to remote
           const remoteFile = await this.backend.getFile(conflict.path);
           const currentSha = remoteFile?.sha;
           const newSha = await this.backend.putFile(conflict.path, mergedContent, currentSha);
-          console.log('[ConflictResolver] Pushed to remote, new SHA:', newSha);
+          this.logger.info('Pushed to remote, new SHA:', newSha);
 
           // Update sync state
           const mergedHash = await this.gitBlobSha1(mergedContent);
           this.stateManager.setFileState(conflict.path, mergedHash);
           this.stateManager.setRemoteSha(conflict.path, newSha);
-          console.log('[ConflictResolver] Sync state updated for:', conflict.path);
+          this.logger.info('Sync state updated for:', conflict.path);
           break;
         }
 
         case 'skip':
-          console.log('[ConflictResolver] Skipping conflict');
+          this.logger.info('Skipping conflict');
           // Do nothing - keep the conflict for next sync
           break;
       }
 
       // Save state after resolution
-      console.log('[ConflictResolver] Saving state...');
+      this.logger.info('Saving state...');
       await this.stateManager.save();
-      console.log('[ConflictResolver] Resolution complete');
+      this.logger.info('Resolution complete');
     } catch (error) {
-      console.error('[ConflictResolver] Error resolving conflict:', error);
+      this.logger.error('Error resolving conflict:', error);
       throw error; // Re-throw to let the modal handle it
     }
   }

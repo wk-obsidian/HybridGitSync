@@ -6,6 +6,15 @@ const DEVICE_CODE_URL = 'https://github.com/login/device/code';
 const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const API_BASE = 'https://api.github.com';
 
+// Debug logging (set to true to enable OAuth debug logs)
+const DEBUG = false;
+
+function log(...args: unknown[]): void {
+  if (DEBUG) {
+    console.log('[OAuth]', ...args);
+  }
+}
+
 interface DeviceCodeResponse {
   device_code: string;
   user_code: string;
@@ -80,7 +89,7 @@ export async function pollForAccessToken(
 ): Promise<OAuthResult> {
   for (let i = 0; i < maxAttempts; i++) {
     await sleep(interval * 1000);
-    console.log(`[OAuth] Polling attempt ${i + 1}/${maxAttempts}...`);
+    log(`Polling attempt ${i + 1}/${maxAttempts}...`);
 
     const response = await requestUrl({
       url: ACCESS_TOKEN_URL,
@@ -97,35 +106,35 @@ export async function pollForAccessToken(
       throw: false,
     });
 
-    console.log('[OAuth] Response status:', response.status);
-    console.log('[OAuth] Response body:', response.text);
+    log('Response status:', response.status);
+    log('Response body:', response.text);
 
     if (response.status !== 200) {
-      console.log('[OAuth] Non-200 status, continuing...');
+      log('Non-200 status, continuing...');
       continue;
     }
 
     const data = response.json as TokenResponse;
-    console.log('[OAuth] Parsed response:', data);
+    log('Parsed response:', data);
 
     if (data.access_token) {
-      console.log('[OAuth] Got access token!');
+      log('Got access token!');
       const username = await getUsername(data.access_token);
       return { success: true, token: data.access_token, username };
     }
 
     if (data.error === 'authorization_pending') {
-      console.log('[OAuth] Still pending...');
+      log('Still pending...');
       continue;
     }
 
     if (data.error === 'slow_down') {
-      console.log('[OAuth] Slowing down...');
+      log('Slowing down...');
       interval += 5;
       continue;
     }
 
-    console.log('[OAuth] Error:', data.error, data.error_description);
+    log('Error:', data.error, data.error_description);
     return { success: false, error: data.error_description || data.error };
   }
 

@@ -71,7 +71,7 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(containerEl).setName(t('settings.title')).setHeading();
 
     // Platform info
-    const infoEl = containerEl.createDiv('setting-item-info');
+    const infoEl = containerEl.createDiv('settings-platform-info');
     infoEl.createEl('span', {
       text: t('settings.platformInfo', {
         platform: this.plugin.getPlatformName(),
@@ -166,10 +166,7 @@ export class SettingsTab extends PluginSettingTab {
         .setDesc(t('settings.selectRepoDesc'));
 
       // Create dropdown on its own line
-      const dropdownEl = repoSetting.settingEl.createEl('select');
-      dropdownEl.style.width = '100%';
-      dropdownEl.style.marginTop = '8px';
-      dropdownEl.style.display = 'block';
+      const dropdownEl = repoSetting.settingEl.createEl('select', { cls: 'settings-repo-select' });
 
       // Add placeholder option
       const placeholderOption = dropdownEl.createEl('option');
@@ -177,20 +174,21 @@ export class SettingsTab extends PluginSettingTab {
       placeholderOption.textContent = t('settings.selectRepoPlaceholder');
 
       // Load repos asynchronously
-      this.loadReposToElement(dropdownEl);
+      void this.loadReposToElement(dropdownEl);
 
-      dropdownEl.addEventListener('change', async () => {
+      dropdownEl.addEventListener('change', () => {
         const value = dropdownEl.value;
         if (value) {
           this.plugin.settings.remoteUrl = value;
           // Auto-set branch from repo
-          const repos = await listRepos(this.plugin.settings.apiToken);
-          const repo = repos.find(r => r.fullName === value);
-          if (repo) {
-            this.plugin.settings.branch = repo.defaultBranch;
-          }
-          await this.plugin.saveSettings();
-          this.display();
+          void listRepos(this.plugin.settings.apiToken).then(repos => {
+            const repo = repos.find(r => r.fullName === value);
+            if (repo) {
+              this.plugin.settings.branch = repo.defaultBranch;
+            }
+            void this.plugin.saveSettings();
+            this.display();
+          });
         }
       });
     }
@@ -373,42 +371,30 @@ export class SettingsTab extends PluginSettingTab {
       .setDesc(t('settings.gitignoreRulesDesc'));
 
     // Create container for textarea and buttons
-    const containerEl = el.createEl('div');
-    containerEl.style.marginTop = '8px';
-    containerEl.style.marginBottom = '16px';
+    const containerEl = el.createEl('div', { cls: 'settings-gitignore-container' });
 
     // Create textarea for .gitignore content
-    const textareaEl = containerEl.createEl('textarea');
-    textareaEl.addClass('settings-gitignore-textarea');
-    textareaEl.style.width = '100%';
-    textareaEl.style.height = '200px';
-    textareaEl.style.fontFamily = 'monospace';
-    textareaEl.style.fontSize = '12px';
-    textareaEl.style.resize = 'vertical';
-    textareaEl.style.display = 'block';
+    const textareaEl = containerEl.createEl('textarea', { cls: 'settings-gitignore-textarea' });
 
     // Load current .gitignore content
-    this.loadGitignoreContent(textareaEl);
+    void this.loadGitignoreContent(textareaEl);
 
     // Buttons container
-    const buttonEl = containerEl.createEl('div');
-    buttonEl.style.marginTop = '8px';
-    buttonEl.style.display = 'flex';
-    buttonEl.style.gap = '8px';
+    const buttonEl = containerEl.createEl('div', { cls: 'settings-gitignore-buttons' });
 
     // Save button
     const saveBtn = buttonEl.createEl('button');
     saveBtn.textContent = t('settings.gitignoreSave');
     saveBtn.addClass('mod-cta');
-    saveBtn.onclick = async () => {
-      await this.saveGitignoreContent(textareaEl.value);
+    saveBtn.onclick = () => {
+      void this.saveGitignoreContent(textareaEl.value);
     };
 
     // Reset button
     const resetBtn = buttonEl.createEl('button');
     resetBtn.textContent = t('settings.gitignoreReset');
-    resetBtn.onclick = async () => {
-      await this.resetGitignoreContent(textareaEl);
+    resetBtn.onclick = () => {
+      void this.resetGitignoreContent(textareaEl);
     };
   }
 

@@ -2,6 +2,7 @@ import { requestUrl, RequestUrlResponse, Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 import { SyncStateManager } from '../sync/state';
 import { GitignoreRules } from '../utils/gitignore';
+import { Logger, LogLevel } from '../utils/logger';
 import { t } from '../i18n';
 import { getErrorMessage, toError } from '../utils/error';
 
@@ -81,6 +82,7 @@ export class ApiBackend extends SyncBackend {
   private stateManager: SyncStateManager;
   private gitignore: GitignoreRules;
   private debug: boolean;
+  private logger: Logger;
 
   constructor(vault: Vault, config: ApiConfig, gitignore?: GitignoreRules, debug: boolean = false) {
     super();
@@ -91,6 +93,7 @@ export class ApiBackend extends SyncBackend {
     this.stateManager = new SyncStateManager(vault);
     this.gitignore = gitignore || new GitignoreRules();
     this.debug = debug;
+    this.logger = new Logger('ApiBackend', debug ? LogLevel.DEBUG : LogLevel.INFO);
     this.log('ApiBackend created', {
       hasVault: !!vault,
       hasAdapter: !!vault?.adapter,
@@ -101,7 +104,7 @@ export class ApiBackend extends SyncBackend {
 
   private log(...args: unknown[]): void {
     if (this.debug) {
-      console.log('[HybridGitSync]', ...args);
+      this.logger.info(...args);
     }
   }
 
@@ -110,7 +113,7 @@ export class ApiBackend extends SyncBackend {
       const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
       // Auto-detect default branch if not specified or invalid
       if (repoInfo.default_branch && this.config.branch !== repoInfo.default_branch) {
-        console.log(`[HybridGitSync] Auto-correcting branch: ${this.config.branch} → ${repoInfo.default_branch}`);
+        this.log(`Auto-correcting branch: ${this.config.branch} → ${repoInfo.default_branch}`);
         this.config.branch = repoInfo.default_branch;
       }
       return true;

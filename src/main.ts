@@ -239,22 +239,22 @@ export default class HybridGitSyncPlugin extends Plugin {
   // ===== Sync Operations =====
 
   async performSync(): Promise<void> {
-    console.log('[HybridGitSync] performSync called');
+    this.log('performSync called');
 
     // Don't sync while resolving conflicts
     if (this.isResolvingConflicts) {
-      console.log('[HybridGitSync] Sync skipped: resolving conflicts');
+      this.log('Sync skipped: resolving conflicts');
       return;
     }
 
     if (!this.settings.remoteUrl) {
-      console.log('[HybridGitSync] Sync skipped: no remote URL');
+      this.log('Sync skipped: no remote URL');
       this.showNotice(t('sync.skipped.noRemote'));
       return;
     }
 
     if (!this.network.isOnline()) {
-      console.log('[HybridGitSync] Sync skipped: offline');
+      this.log('Sync skipped: offline');
       this.statusBar.setState('offline');
       this.showNotice(t('sync.skipped.offline'));
       return;
@@ -262,24 +262,24 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Check if backend is initialized
     if (!this.backend) {
-      console.log('[HybridGitSync] Sync skipped: backend not initialized');
+      this.log('Sync skipped: backend not initialized');
       this.statusBar.setState('error', 'Backend not initialized');
       this.showNotice(t('sync.skipped.backendNotInitialized'));
       return;
     }
 
     // Check backend availability
-    console.log('[HybridGitSync] Checking backend availability...');
+    this.log('Checking backend availability...');
     const available = await this.backend.isAvailable();
     if (!available) {
-      console.log('[HybridGitSync] Sync skipped: backend not available');
+      this.log('Sync skipped: backend not available');
       this.statusBar.setState('error', 'Backend not available');
       this.showNotice(t('sync.skipped.backendNotAvailable', { backend: this.backend.name }));
       return;
     }
 
     // Use sync queue with debouncing
-    console.log('[HybridGitSync] Enqueuing sync operation...');
+    this.log('Enqueuing sync operation...');
     this.syncQueue.enqueue(async () => {
       this.log('Sync queue callback executing', {
         hasBackend: !!this.backend,
@@ -433,10 +433,10 @@ export default class HybridGitSyncPlugin extends Plugin {
               const contentHash = await apiBackend.gitBlobSha1(content);
               stateManager.setFileState(conflict.path, contentHash);
               await stateManager.save();
-              console.log('[HybridGitSync] Updated sync state after merge:', conflict.path);
+              this.log('Updated sync state after merge:', conflict.path);
             }
           } catch (error) {
-            console.error('[HybridGitSync] Failed to update sync state:', error);
+            this.logger.error('Failed to update sync state:', error);
           }
         }
 
@@ -890,7 +890,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private log(...args: unknown[]): void {
     if (this.settings.debug) {
-      console.log('[HybridGitSync]', ...args);
+      this.logger.info(...args);
     }
   }
 }
