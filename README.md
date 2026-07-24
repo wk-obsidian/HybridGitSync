@@ -1,6 +1,6 @@
 # Hybrid Git Sync for Obsidian
 
-[English](#english) | [中文说明](#中文说明)
+[English](https://github.com/wk-obsidian/HybridGitSync/blob/main/README.md)｜[中文](https://github.com/wk-obsidian/HybridGitSync/blob/main/README_ZH.md)
 
 > 🚀 **An adaptive, cross-platform Git synchronization solution for Obsidian.**  
 > Enjoy high-performance Native Git execution on Desktop alongside a lightweight, zero-dependency Git Provider API on Mobile.
