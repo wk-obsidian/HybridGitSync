@@ -161,6 +161,7 @@ export default {
   'settings.selectRepoPlaceholder': 'Select a repository...',
   'settings.customApiUrl': 'Custom API URL',
   'settings.customApiUrlDesc': 'For self-hosted instances (leave empty for default)',
+  'settings.customApiUrlDescGitea': 'Required for self-hosted Gitea. Enter your Gitea API URL (e.g. https://your-gitea.com/api/v1)',
   'settings.gitPath': 'Git path',
   'settings.gitPathDesc': 'Path to git executable (desktop only)',
   'settings.autoSync': 'Auto Sync',

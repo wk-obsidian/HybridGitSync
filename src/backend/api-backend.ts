@@ -263,11 +263,12 @@ export class ApiBackend extends SyncBackend {
         remoteMap = await this.getRemoteTree();
         this.log('Remote files:', remoteMap.size);
       } catch (error) {
-        // Network error - cannot reach remote
-        console.warn('[HybridGitSync] Cannot reach remote, skipping sync:', getErrorMessage(error));
+        // Network error or API error
+        const errorMsg = getErrorMessage(error);
+        this.logger.warn('Cannot reach remote, skipping sync:', errorMsg);
         return {
           success: false,
-          message: 'Cannot reach remote. Check network connection.',
+          message: `Cannot reach remote: ${errorMsg}`,
           error: toError(error),
         };
       }
@@ -762,13 +763,21 @@ export class ApiBackend extends SyncBackend {
   async getRemoteTree(): Promise<Map<string, string>> {
     const fileMap = new Map<string, string>();
 
-    const branchInfo = await this.apiRequest('GET',
+    // Gitea returns an array, GitHub returns a single object
+    const refData = await this.apiRequest('GET',
       `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
-    ) as GitRef;
+    );
+    const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
+
+    if (!branchInfo?.object?.sha) {
+      throw new Error(`Branch not found: ${this.config.branch}`);
+    }
     const treeSha = branchInfo.object.sha;
 
+    // Gitea uses ?recursive=true, GitHub uses ?recursive=1
+    const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
     const tree = await this.apiRequest('GET',
-      `/repos/${this.config.repo}/git/trees/${treeSha}?recursive=1`
+      `/repos/${this.config.repo}/git/trees/${treeSha}?${recursiveParam}`
     ) as GitTreeResponse;
 
     if (tree.tree) {
@@ -789,8 +798,10 @@ export class ApiBackend extends SyncBackend {
    */
   async getCommitHistory(limit: number = 50): Promise<CommitInfo[]> {
     try {
+      // Gitea uses 'limit', GitHub uses 'per_page'
+      const limitParam = this.config.provider === 'gitea' ? 'limit' : 'per_page';
       const data = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&per_page=${limit}`
+        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&${limitParam}=${limit}`
       ) as Array<Record<string, unknown>>;
       return data.map((commit) => {
         const commitData = commit.commit as Record<string, unknown>;
@@ -843,8 +854,10 @@ export class ApiBackend extends SyncBackend {
    */
   async getFileHistory(path: string, limit: number = 20): Promise<CommitInfo[]> {
     try {
+      // Gitea uses 'limit', GitHub uses 'per_page'
+      const limitParam = this.config.provider === 'gitea' ? 'limit' : 'per_page';
       const data = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&path=${path}&per_page=${limit}`
+        `/repos/${this.config.repo}/commits?sha=${this.config.branch}&path=${path}&${limitParam}=${limit}`
       ) as Array<Record<string, unknown>>;
       return data.map((commit) => {
         const commitData = commit.commit as Record<string, unknown>;

@@ -231,9 +231,14 @@ export class SettingsTab extends PluginSettingTab {
           this.display();
         }));
 
+    // Show different description for Gitea
+    const customUrlDesc = this.plugin.settings.apiProvider === 'gitea'
+      ? t('settings.customApiUrlDescGitea')
+      : t('settings.customApiUrlDesc');
+
     new Setting(el)
       .setName(t('settings.customApiUrl'))
-      .setDesc(t('settings.customApiUrlDesc'))
+      .setDesc(customUrlDesc)
       .addText(cb => cb
         .setPlaceholder('https://your-gitea.com/api/v1')
         .setValue(this.plugin.settings.apiBaseUrl)

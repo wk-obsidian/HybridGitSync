@@ -161,6 +161,7 @@ export default {
   'settings.selectRepoPlaceholder': '请选择仓库...',
   'settings.customApiUrl': '自定义 API URL',
   'settings.customApiUrlDesc': '用于自托管实例（留空使用默认）',
+  'settings.customApiUrlDescGitea': '自托管 Gitea 必填。请输入 Gitea API URL（例如 https://your-gitea.com/api/v1）',
   'settings.gitPath': 'Git 路径',
   'settings.gitPathDesc': 'Git 可执行文件路径（仅桌面端）',
   'settings.autoSync': '自动同步',
