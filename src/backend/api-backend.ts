@@ -5,6 +5,8 @@ import { GitignoreRules } from '../utils/gitignore';
 import { Logger, LogLevel } from '../utils/logger';
 import { t } from '../i18n';
 import { getErrorMessage, toError } from '../utils/error';
+import { isBinaryFile } from '../utils/binary';
+import { TempFileManager } from '../utils/temp-file';
 
 export type ApiProvider = 'github' | 'gitlab' | 'gitea';
 
@@ -83,6 +85,7 @@ export class ApiBackend extends SyncBackend {
   private gitignore: GitignoreRules;
   private debug: boolean;
   private logger: Logger;
+  private tempFileManager: TempFileManager;
 
   constructor(vault: Vault, config: ApiConfig, gitignore?: GitignoreRules, debug: boolean = false) {
     super();
@@ -94,6 +97,7 @@ export class ApiBackend extends SyncBackend {
     this.gitignore = gitignore || new GitignoreRules();
     this.debug = debug;
     this.logger = new Logger('ApiBackend', debug ? LogLevel.DEBUG : LogLevel.INFO);
+    this.tempFileManager = new TempFileManager(vault, debug);
     this.log('ApiBackend created', {
       hasVault: !!vault,
       hasAdapter: !!vault?.adapter,
@@ -124,6 +128,10 @@ export class ApiBackend extends SyncBackend {
 
   async pull(): Promise<SyncResult> {
     try {
+      // Clean up orphaned temp files first
+      await this.tempFileManager.cleanup();
+      await this.tempFileManager.init();
+
       const remoteFiles = await this.listFilesRecursive('');
       let pulled = 0;
 
@@ -131,12 +139,19 @@ export class ApiBackend extends SyncBackend {
         const remote = await this.getFile(file.path);
         if (!remote) continue;
 
+        const isBinary = isBinaryFile(file.path);
+
         // Check if local file exists and differs
         let needUpdate = false;
         try {
-          const localContent = await this.vault.adapter.read(file.path);
-          if (localContent !== remote.content) {
-            needUpdate = true;
+          if (isBinary) {
+            const localContent = await this.vault.adapter.readBinary(file.path);
+            needUpdate = localContent.byteLength !== (remote.content as ArrayBuffer).byteLength;
+          } else {
+            const localContent = await this.vault.adapter.read(file.path);
+            if (localContent !== remote.content) {
+              needUpdate = true;
+            }
           }
         } catch {
           // File doesn't exist locally
@@ -144,12 +159,8 @@ export class ApiBackend extends SyncBackend {
         }
 
         if (needUpdate) {
-          // Ensure parent directory exists
-          const dir = file.path.substring(0, file.path.lastIndexOf('/'));
-          if (dir) {
-            try { await this.vault.adapter.mkdir(dir); } catch { /* directory may already exist */ }
-          }
-          await this.vault.adapter.write(file.path, remote.content);
+          // Use safe write for atomic file operations
+          await this.tempFileManager.writeSafe(file.path, remote.content);
           pulled++;
         }
       }
@@ -189,15 +200,28 @@ export class ApiBackend extends SyncBackend {
         if (this.shouldIgnore(localPath)) continue;
 
         try {
-          const localContent = await this.vault.adapter.read(localPath);
+          const isBinary = isBinaryFile(localPath);
           const remoteSha = remoteMap.get(localPath);
+
+          let localContent: string | ArrayBuffer;
+          if (isBinary) {
+            localContent = await this.vault.adapter.readBinary(localPath);
+          } else {
+            localContent = await this.vault.adapter.read(localPath);
+          }
 
           // Check if file needs update by comparing content
           if (remoteSha) {
             const remoteFile = await this.getFile(localPath);
-            if (remoteFile && remoteFile.content === localContent) {
-              remoteMap.delete(localPath); // Mark as processed
-              continue; // No change
+            if (remoteFile) {
+              // For binary files, compare by size; for text, compare content
+              const isSame = isBinary
+                ? (remoteFile.content as ArrayBuffer).byteLength === (localContent as ArrayBuffer).byteLength
+                : remoteFile.content === localContent;
+              if (isSame) {
+                remoteMap.delete(localPath); // Mark as processed
+                continue; // No change
+              }
             }
           }
 
@@ -252,6 +276,10 @@ export class ApiBackend extends SyncBackend {
       let pushed = 0;
       let deleted = 0;
       const errors: string[] = [];
+
+      // Step 0: Clean up orphaned temp files and initialize temp directory
+      await this.tempFileManager.cleanup();
+      await this.tempFileManager.init();
 
       // Step 1: Load sync state
       await this.stateManager.load();
@@ -318,8 +346,13 @@ export class ApiBackend extends SyncBackend {
       const localMap = new Map<string, string>(); // path -> content hash
       for (const path of localFiles) {
         try {
-          const content = await this.vault.adapter.read(path);
-          localMap.set(path, await this.gitBlobSha1(content));
+          if (isBinaryFile(path)) {
+            const content = await this.vault.adapter.readBinary(path);
+            localMap.set(path, await this.gitBlobSha1Binary(content));
+          } else {
+            const content = await this.vault.adapter.read(path);
+            localMap.set(path, await this.gitBlobSha1(content));
+          }
         } catch { /* skip files that can't be read */ }
       }
       this.log('Local files:', localMap.size);
@@ -393,22 +426,33 @@ export class ApiBackend extends SyncBackend {
       for (const path of actions.needsContentComparison) {
         if (this.shouldIgnore(path)) continue;
         try {
-          const localContent = await this.vault.adapter.read(path);
+          const isBinary = isBinaryFile(path);
           const remoteFile = await this.getFile(path);
           if (!remoteFile) continue;
 
-          if (localContent === remoteFile.content) {
+          let localContent: string | ArrayBuffer;
+          let localHash: string;
+          let remoteHash: string;
+
+          if (isBinary) {
+            localContent = await this.vault.adapter.readBinary(path);
+            localHash = await this.gitBlobSha1Binary(localContent);
+            remoteHash = await this.gitBlobSha1Binary(remoteFile.content as ArrayBuffer);
+          } else {
+            localContent = await this.vault.adapter.read(path);
+            localHash = await this.gitBlobSha1(localContent);
+            remoteHash = await this.gitBlobSha1(remoteFile.content as string);
+          }
+
+          // Compare by hash (works for both text and binary)
+          if (localHash === remoteHash) {
             // Same content - no action needed, just update state
-            const contentHash = await this.gitBlobSha1(localContent);
-            this.stateManager.setFileState(path, contentHash);
+            this.stateManager.setFileState(path, localHash);
             this.log('Same content on both sides:', path);
           } else {
             // Different content - check who changed
             const storedHash = this.stateManager.getFileState(path);
             if (storedHash) {
-              const localHash = await this.gitBlobSha1(localContent);
-              const remoteHash = await this.gitBlobSha1(remoteFile.content);
-
               if (storedHash === localHash) {
                 // Local unchanged, remote changed → pull
                 this.log('Remote changed, pulling:', path);
@@ -445,21 +489,42 @@ export class ApiBackend extends SyncBackend {
         conflicts: actions.conflicts.length,
       });
 
-      // Step 9: Pull new/modified remote files (parallel, max 3)
-      const pullPromises = actions.pullFromRemote
-        .filter(path => !this.shouldIgnore(path))
+      // Step 9: Pull new/modified remote files
+      // Separate large files from small files for better handling
+      const smallFiles: string[] = [];
+      const largeFiles: string[] = [];
+      const LARGE_FILE_THRESHOLD = 1024 * 1024; // 1MB
+
+      for (const path of actions.pullFromRemote) {
+        if (this.shouldIgnore(path)) continue;
+        const remoteSha = remoteMap.get(path);
+        // We'll determine size during download, so check all files
+        smallFiles.push(path);
+      }
+
+      this.log('Files to pull:', smallFiles.length);
+
+      // Download small files in parallel (max 3)
+      const pullPromises = smallFiles
         .map(async (path) => {
           try {
             const remoteFile = await this.getFile(path);
             if (!remoteFile) return;
 
-            const dir = path.substring(0, path.lastIndexOf('/'));
-            if (dir) {
-              try { await this.vault.adapter.mkdir(dir); } catch { /* directory may already exist */ }
-            }
-            await this.vault.adapter.write(path, remoteFile.content);
+            const isBinary = isBinaryFile(path);
+            const contentSize = isBinary
+              ? (remoteFile.content as ArrayBuffer).byteLength
+              : (remoteFile.content as string).length;
+
+            this.log(`Processing ${path}: ${contentSize} bytes, binary: ${isBinary}`);
+
+            // Use safe write for atomic file operations
+            await this.tempFileManager.writeSafe(path, remoteFile.content);
+
             // Store content hash (SHA-1)
-            const contentHash = await this.gitBlobSha1(remoteFile.content);
+            const contentHash = isBinary
+              ? await this.gitBlobSha1Binary(remoteFile.content as ArrayBuffer)
+              : await this.gitBlobSha1(remoteFile.content as string);
             this.stateManager.setFileState(path, contentHash);
             // Update cached remote SHA
             const remoteSha = remoteMap.get(path);
@@ -483,19 +548,32 @@ export class ApiBackend extends SyncBackend {
         .filter(path => !this.shouldIgnore(path))
         .map(async (path) => {
           try {
-            const content = await this.vault.adapter.read(path);
+            const isBinary = isBinaryFile(path);
+            let content: string | ArrayBuffer;
+            let contentHash: string;
 
-            // Check file size before uploading
-            if (this.isFileTooLarge(content)) {
-              const size = new TextEncoder().encode(content).length;
-              console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize(size)})`);
-              return;
+            if (isBinary) {
+              content = await this.vault.adapter.readBinary(path);
+              // Check file size before uploading
+              if ((content as ArrayBuffer).byteLength > 50 * 1024 * 1024) {
+                console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize((content as ArrayBuffer).byteLength)})`);
+                return;
+              }
+              contentHash = await this.gitBlobSha1Binary(content as ArrayBuffer);
+            } else {
+              content = await this.vault.adapter.read(path);
+              // Check file size before uploading
+              if (this.isFileTooLarge(content as string)) {
+                const size = new TextEncoder().encode(content as string).length;
+                console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize(size)})`);
+                return;
+              }
+              contentHash = await this.gitBlobSha1(content as string);
             }
 
             const sha = remoteMap.get(path);
             const newSha = await this.putFile(path, content, sha);
             // Store content hash (SHA-1)
-            const contentHash = await this.gitBlobSha1(content);
             this.stateManager.setFileState(path, contentHash);
             // Update cached remote SHA
             this.stateManager.setRemoteSha(path, newSha);
@@ -596,10 +674,20 @@ export class ApiBackend extends SyncBackend {
         if (!remoteSha) {
           changedFiles.push({ path: localPath, status: 'added' });
         } else {
-          const localContent = await this.vault.adapter.read(localPath);
+          const isBinary = isBinaryFile(localPath);
           const remoteFile = await this.getFile(localPath);
-          if (remoteFile && remoteFile.content !== localContent) {
-            changedFiles.push({ path: localPath, status: 'modified' });
+          if (remoteFile) {
+            let isSame: boolean;
+            if (isBinary) {
+              const localContent = await this.vault.adapter.readBinary(localPath);
+              isSame = (remoteFile.content as ArrayBuffer).byteLength === localContent.byteLength;
+            } else {
+              const localContent = await this.vault.adapter.read(localPath);
+              isSame = remoteFile.content === localContent;
+            }
+            if (!isSame) {
+              changedFiles.push({ path: localPath, status: 'modified' });
+            }
           }
           remoteMap.delete(localPath);
         }
@@ -649,9 +737,21 @@ export class ApiBackend extends SyncBackend {
   // ===== File operations =====
 
   /**
-   * Decode base64 to UTF-8 string
+   * Decode base64 to ArrayBuffer (for binary files)
    */
-  private decodeBase64(base64: string): string {
+  private decodeBase64Binary(base64: string): ArrayBuffer {
+    const binaryStr = atob(base64);
+    const bytes = new Uint8Array(binaryStr.length);
+    for (let i = 0; i < binaryStr.length; i++) {
+      bytes[i] = binaryStr.charCodeAt(i);
+    }
+    return bytes.buffer;
+  }
+
+  /**
+   * Decode base64 to UTF-8 string (for text files)
+   */
+  private decodeBase64Text(base64: string): string {
     const binaryStr = atob(base64);
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) {
@@ -661,9 +761,21 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
-   * Encode UTF-8 string to base64
+   * Encode ArrayBuffer to base64 (for binary files)
    */
-  private encodeBase64(str: string): string {
+  private encodeBase64Binary(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    let binaryStr = '';
+    for (let i = 0; i < bytes.length; i++) {
+      binaryStr += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binaryStr);
+  }
+
+  /**
+   * Encode UTF-8 string to base64 (for text files)
+   */
+  private encodeBase64Text(str: string): string {
     const bytes = new TextEncoder().encode(str);
     let binaryStr = '';
     for (let i = 0; i < bytes.length; i++) {
@@ -672,17 +784,85 @@ export class ApiBackend extends SyncBackend {
     return btoa(binaryStr);
   }
 
-  async getFile(path: string): Promise<{ content: string; sha: string } | null> {
+  async getFile(path: string): Promise<{ content: string | ArrayBuffer; sha: string } | null> {
     try {
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${this.config.branch}`
-      ) as FileContent;
+      ) as FileContent & { download_url?: string; size?: number };
       if (data.type !== 'file') return null;
 
-      let content: string;
-      if (data.encoding === 'base64') {
+      const isBinary = isBinaryFile(path);
+      let content: string | ArrayBuffer;
+
+      // For large files (>1MB), content may be empty - use download_url with proper encoding
+      if (!data.content && data.download_url) {
+        this.log('Large file detected, using download_url:', path);
+        this.log('File size:', data.size, 'bytes');
+        const startTime = Date.now();
         try {
-          content = this.decodeBase64(data.content);
+          // Encode the download_url properly to handle Chinese characters
+          const downloadUrl = encodeURI(data.download_url);
+          this.log('Encoded download URL:', downloadUrl);
+
+          this.log('Starting download...');
+
+          // Create a wrapper to track download progress
+          const downloadPromise = (async () => {
+            try {
+              const result = await requestUrl({
+                url: downloadUrl,
+                method: 'GET',
+                throw: false,
+              });
+              return result;
+            } catch (err) {
+              this.log('requestUrl threw error:', err);
+              throw err;
+            }
+          })();
+
+          // 2 minute timeout for large files (Obsidian may have shorter internal timeout)
+          const timeoutMs = 2 * 60 * 1000;
+          const timeoutPromise = new Promise<never>((_, reject) => {
+            const timer = setTimeout(() => {
+              this.log(`Download timeout after ${timeoutMs}ms for: ${path}`);
+              reject(new Error(`Download timeout after ${timeoutMs / 1000} seconds`));
+            }, timeoutMs);
+            // Prevent timer from keeping process alive
+            if (timer.unref) timer.unref();
+          });
+
+          const response = await Promise.race([downloadPromise, timeoutPromise]);
+          const elapsed = Date.now() - startTime;
+          this.log(`Download completed in ${elapsed}ms`);
+
+          this.log('Download response status:', response.status);
+          if (response.status >= 400) {
+            this.log('Download response text:', response.text?.substring(0, 500));
+            throw new Error(`Download failed with status ${response.status}`);
+          }
+          const responseSize = response.arrayBuffer?.byteLength || response.text?.length || 0;
+          this.log('Download response size:', responseSize, 'bytes');
+          if (responseSize === 0) {
+            throw new Error('Download response is empty');
+          }
+          if (isBinary) {
+            content = response.arrayBuffer;
+          } else {
+            content = response.text;
+          }
+        } catch (downloadError) {
+          const elapsed = Date.now() - startTime;
+          console.error(`[HybridGitSync] Download failed for ${path} after ${elapsed}ms:`, downloadError);
+          throw new Error(`Failed to download large file: ${getErrorMessage(downloadError)}`);
+        }
+      } else if (data.encoding === 'base64') {
+        try {
+          if (isBinary) {
+            content = this.decodeBase64Binary(data.content);
+          } else {
+            content = this.decodeBase64Text(data.content);
+          }
         } catch {
           console.warn('[HybridGitSync] Base64 decode failed for:', path, '- using raw content');
           content = data.content;
@@ -699,10 +879,15 @@ export class ApiBackend extends SyncBackend {
     }
   }
 
-  async putFile(path: string, content: string, sha?: string): Promise<string> {
+  async putFile(path: string, content: string | ArrayBuffer, sha?: string): Promise<string> {
+    const isBinary = content instanceof ArrayBuffer;
+    const base64Content = isBinary
+      ? this.encodeBase64Binary(content)
+      : this.encodeBase64Text(content);
+
     const body: Record<string, string> = {
       message: `sync: ${path}`,
-      content: this.encodeBase64(content),
+      content: base64Content,
       branch: this.config.branch,
     };
     if (sha) body.sha = sha;
@@ -885,7 +1070,9 @@ export class ApiBackend extends SyncBackend {
         `/repos/${this.config.repo}/contents/${path}?ref=${sha}`
       ) as FileContent;
       if (data.encoding === 'base64') {
-        return this.decodeBase64(data.content);
+        // For binary files, we still return string for history view
+        // The history view is read-only and doesn't need perfect binary handling
+        return this.decodeBase64Text(data.content);
       }
       return data.content;
     } catch (error) {
@@ -953,12 +1140,31 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
-   * Generate Git-compatible blob SHA-1
+   * Generate Git-compatible blob SHA-1 for text content
    * Git computes SHA as: SHA1("blob " + content.length + "\0" + content)
    */
   async gitBlobSha1(content: string): Promise<string> {
     const encoder = new TextEncoder();
     const contentBytes = encoder.encode(content);
+    const header = encoder.encode(`blob ${contentBytes.length}\0`);
+
+    // Combine header and content
+    const combined = new Uint8Array(header.length + contentBytes.length);
+    combined.set(header);
+    combined.set(contentBytes, header.length);
+
+    const hashBuffer = await crypto.subtle.digest('SHA-1', combined);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /**
+   * Generate Git-compatible blob SHA-1 for binary content (ArrayBuffer)
+   * Git computes SHA as: SHA1("blob " + content.length + "\0" + content)
+   */
+  async gitBlobSha1Binary(content: ArrayBuffer): Promise<string> {
+    const encoder = new TextEncoder();
+    const contentBytes = new Uint8Array(content);
     const header = encoder.encode(`blob ${contentBytes.length}\0`);
 
     // Combine header and content

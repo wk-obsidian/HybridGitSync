@@ -13,6 +13,7 @@ import { ConflictResolver, ConflictInfo } from './sync/conflict';
 import type { DiffResult } from './utils/diff';
 import { SyncQueue } from './sync/queue';
 import { NetworkStatus } from './utils/network';
+import { isBinaryFile } from './utils/binary';
 import { GitignoreRules } from './utils/gitignore';
 import { Logger, LogLevel } from './utils/logger';
 import { SettingsIO } from './utils/settings-io';
@@ -371,21 +372,38 @@ export default class HybridGitSyncPlugin extends Plugin {
 
       // Remote changed - check if local also changed
       try {
-        const localContent = await this.app.vault.adapter.read(path);
-        const localHash = await apiBackend.gitBlobSha1(localContent);
+        const binary = isBinaryFile(path);
+        let localContent: string | ArrayBuffer;
+        let localHash: string;
+
+        if (binary) {
+          localContent = await this.app.vault.adapter.readBinary(path);
+          localHash = await apiBackend.gitBlobSha1Binary(localContent);
+        } else {
+          localContent = await this.app.vault.adapter.read(path);
+          localHash = await apiBackend.gitBlobSha1(localContent);
+        }
+
         const localChanged = localHash !== storedHash;
 
         if (localChanged) {
           // Both sides changed - this is a real conflict
           const remoteFile = await apiBackend.getFile(path);
-          if (remoteFile && localContent !== remoteFile.content) {
-            conflicts.push({
-              path,
-              localContent,
-              remoteContent: remoteFile.content,
-              localModified: new Date(),
-              remoteModified: new Date(),
-            });
+          if (remoteFile) {
+            const isDifferent = binary
+              ? (localContent as ArrayBuffer).byteLength !== (remoteFile.content as ArrayBuffer).byteLength
+              : localContent !== remoteFile.content;
+
+            if (isDifferent) {
+              conflicts.push({
+                path,
+                localContent,
+                remoteContent: remoteFile.content,
+                localModified: new Date(),
+                remoteModified: new Date(),
+                isBinary: binary,
+              });
+            }
           }
         }
       } catch {
@@ -782,7 +800,11 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
-    await this.app.vault.adapter.write(activeFile.path, remoteFile.content);
+    if (isBinaryFile(activeFile.path)) {
+      await this.app.vault.adapter.writeBinary(activeFile.path, remoteFile.content as ArrayBuffer);
+    } else {
+      await this.app.vault.adapter.write(activeFile.path, remoteFile.content as string);
+    }
     this.showNotice(t('notice.fileRestored', { path: activeFile.path }));
   }
 
@@ -864,6 +886,12 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
+    // Binary files cannot be diffed
+    if (isBinaryFile(path)) {
+      this.showNotice('Diff view is not available for binary files');
+      return;
+    }
+
     const leaf = this.app.workspace.getRightLeaf(false);
     if (!leaf) return;
 
@@ -878,7 +906,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Get remote content
     const remoteFile = await (this.backend as ApiBackend).getFile(path);
-    const remoteContent = remoteFile?.content || '';
+    const remoteContent = remoteFile?.content as string || '';
 
     view.setDiff(path, remoteContent, localContent);
   }

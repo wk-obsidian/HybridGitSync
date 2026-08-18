@@ -4,16 +4,18 @@ import { SyncStateManager } from './state';
 import { Logger, LogLevel } from '../utils/logger';
 import { computeDiff, mergeWithoutMarkers } from '../utils/diff';
 import type { DiffResult } from '../utils/diff';
+import { isBinaryFile } from '../utils/binary';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
 // 'merge' = auto-merge with conflict markers and save to file
 
 export interface ConflictInfo {
   path: string;
-  localContent: string;
-  remoteContent: string;
+  localContent: string | ArrayBuffer;
+  remoteContent: string | ArrayBuffer;
   localModified: Date;
   remoteModified: Date;
+  isBinary: boolean;
 }
 
 /**
@@ -33,7 +35,7 @@ export class ConflictResolver {
   }
 
   /**
-   * Generate Git-compatible blob SHA-1
+   * Generate Git-compatible blob SHA-1 for text content
    */
   private async gitBlobSha1(content: string): Promise<string> {
     const encoder = new TextEncoder();
@@ -50,10 +52,27 @@ export class ConflictResolver {
   }
 
   /**
+   * Generate Git-compatible blob SHA-1 for binary content (ArrayBuffer)
+   */
+  private async gitBlobSha1Binary(content: ArrayBuffer): Promise<string> {
+    const encoder = new TextEncoder();
+    const contentBytes = new Uint8Array(content);
+    const header = encoder.encode(`blob ${contentBytes.length}\0`);
+
+    const combined = new Uint8Array(header.length + contentBytes.length);
+    combined.set(header);
+    combined.set(contentBytes, header.length);
+
+    const hashBuffer = await crypto.subtle.digest('SHA-1', combined);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  /**
    * Detect conflicts between local and remote files
    * A conflict occurs when both local and remote have different changes
    */
-  async detectConflicts(localFiles: Map<string, string>): Promise<ConflictInfo[]> {
+  async detectConflicts(localFiles: Map<string, string | ArrayBuffer>): Promise<ConflictInfo[]> {
     const conflicts: ConflictInfo[] = [];
 
     // Get remote files
@@ -76,7 +95,16 @@ export class ConflictResolver {
       if (!remoteFile) continue;
 
       // Compare contents
-      if (remoteFile.content !== localContent) {
+      const binary = isBinaryFile(localPath);
+      let isDifferent: boolean;
+      if (binary) {
+        // For binary files, compare by size
+        isDifferent = (localContent as ArrayBuffer).byteLength !== (remoteFile.content as ArrayBuffer).byteLength;
+      } else {
+        isDifferent = remoteFile.content !== localContent;
+      }
+
+      if (isDifferent) {
         // Both sides have different content - this is a conflict
         conflicts.push({
           path: localPath,
@@ -84,6 +112,7 @@ export class ConflictResolver {
           remoteContent: remoteFile.content,
           localModified: new Date(), // We don't track local modification time yet
           remoteModified: new Date(),
+          isBinary: binary,
         });
       }
     }
@@ -126,7 +155,9 @@ export class ConflictResolver {
               const newSha = await this.backend.putFile(conflict.path, conflict.localContent, currentSha);
               this.logger.info('Pushed, new SHA:', newSha);
               // Update sync state with local content hash
-              const localHash = await this.gitBlobSha1(conflict.localContent);
+              const localHash = conflict.isBinary
+                ? await this.gitBlobSha1Binary(conflict.localContent as ArrayBuffer)
+                : await this.gitBlobSha1(conflict.localContent as string);
               this.stateManager.setFileState(conflict.path, localHash);
               // Update cached remote SHA
               this.stateManager.setRemoteSha(conflict.path, newSha);
@@ -145,9 +176,15 @@ export class ConflictResolver {
         case 'remote': {
           // Keep remote version, write to local
           this.logger.info('Writing remote content to local...');
-          await this.vault.adapter.write(conflict.path, conflict.remoteContent);
+          if (conflict.isBinary) {
+            await this.vault.adapter.writeBinary(conflict.path, conflict.remoteContent as ArrayBuffer);
+          } else {
+            await this.vault.adapter.write(conflict.path, conflict.remoteContent as string);
+          }
           // Update sync state with remote content hash
-          const remoteHash = await this.gitBlobSha1(conflict.remoteContent);
+          const remoteHash = conflict.isBinary
+            ? await this.gitBlobSha1Binary(conflict.remoteContent as ArrayBuffer)
+            : await this.gitBlobSha1(conflict.remoteContent as string);
           this.stateManager.setFileState(conflict.path, remoteHash);
           // Remote SHA stays the same (we're using remote's version)
           break;
@@ -163,11 +200,17 @@ export class ConflictResolver {
           const remotePath = `${baseName}.remote${extension}`;
 
           this.logger.info('Saving both versions:', localPath, remotePath);
-          await this.vault.adapter.write(localPath, conflict.localContent);
-          await this.vault.adapter.write(remotePath, conflict.remoteContent);
-          // Update sync state for both files
-          this.stateManager.setFileState(localPath, await this.gitBlobSha1(conflict.localContent));
-          this.stateManager.setFileState(remotePath, await this.gitBlobSha1(conflict.remoteContent));
+          if (conflict.isBinary) {
+            await this.vault.adapter.writeBinary(localPath, conflict.localContent as ArrayBuffer);
+            await this.vault.adapter.writeBinary(remotePath, conflict.remoteContent as ArrayBuffer);
+            this.stateManager.setFileState(localPath, await this.gitBlobSha1Binary(conflict.localContent as ArrayBuffer));
+            this.stateManager.setFileState(remotePath, await this.gitBlobSha1Binary(conflict.remoteContent as ArrayBuffer));
+          } else {
+            await this.vault.adapter.write(localPath, conflict.localContent as string);
+            await this.vault.adapter.write(remotePath, conflict.remoteContent as string);
+            this.stateManager.setFileState(localPath, await this.gitBlobSha1(conflict.localContent as string));
+            this.stateManager.setFileState(remotePath, await this.gitBlobSha1(conflict.remoteContent as string));
+          }
           // Remove original path from state
           this.stateManager.removeFileState(conflict.path);
           this.stateManager.removeRemoteSha(conflict.path);
@@ -175,12 +218,18 @@ export class ConflictResolver {
         }
 
         case 'merge': {
+          // Binary files cannot be auto-merged
+          if (conflict.isBinary) {
+            this.logger.warn('Cannot auto-merge binary file:', conflict.path);
+            throw new Error('Binary files cannot be auto-merged. Please choose local or remote version.');
+          }
+
           // Auto-merge: combine both versions without conflict markers
           this.logger.info('Auto-merging:', conflict.path);
 
           const mergedContent = mergeWithoutMarkers(
-            conflict.localContent,
-            conflict.remoteContent
+            conflict.localContent as string,
+            conflict.remoteContent as string
           );
 
           // Save merged content locally
