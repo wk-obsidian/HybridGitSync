@@ -188,10 +188,30 @@ export default class HybridGitSyncPlugin extends Plugin {
     if (!available) {
       this.statusBar.setState('idle', 'Not configured');
       this.log('Backend not available, will check again on sync');
+      return;
     }
 
-    // Save corrected branch if using API backend
+    // Check for empty repository and initialize if needed
     if (this.backend instanceof ApiBackend) {
+      try {
+        const isEmpty = await this.backend.isEmptyRepo();
+        if (isEmpty) {
+          this.log('Empty repository detected, initializing...');
+          this.showNotice(t('repo.initializing'));
+          const result = await this.backend.initializeRepo();
+          if (result.success) {
+            this.showNotice(result.message);
+            this.log('Repository initialized successfully');
+          } else {
+            this.showNotice(result.message);
+            this.logger.warn('Repository initialization failed:', result.message);
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Failed to check empty repo:', error);
+      }
+
+      // Save corrected branch
       const correctedBranch = this.backend.getBranch();
       if (correctedBranch !== this.settings.branch) {
         this.settings.branch = correctedBranch;
@@ -286,6 +306,28 @@ export default class HybridGitSyncPlugin extends Plugin {
       this.statusBar.setState('error', 'Backend not available');
       this.showNotice(t('sync.skipped.backendNotAvailable', { backend: this.backend.name }));
       return;
+    }
+
+    // Check for empty repository and initialize if needed (before sync)
+    if (this.backend instanceof ApiBackend) {
+      try {
+        const isEmpty = await this.backend.isEmptyRepo();
+        if (isEmpty) {
+          this.log('Empty repository detected during sync, initializing...');
+          this.showNotice(t('repo.initializing'));
+          const initResult = await this.backend.initializeRepo();
+          if (initResult.success) {
+            this.showNotice(initResult.message);
+            this.log('Repository initialized successfully');
+          } else {
+            this.showNotice(initResult.message);
+            this.logger.warn('Repository initialization failed:', initResult.message);
+            return; // Don't proceed with sync if init failed
+          }
+        }
+      } catch (error) {
+        this.logger.warn('Failed to check empty repo:', error);
+      }
     }
 
     // Use sync queue with debouncing

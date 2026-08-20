@@ -20,6 +20,9 @@ export abstract class SyncBackend {
   /** Get current sync status */
   abstract status(): Promise<SyncStatus>;
 
+  /** Initialize an empty repository (create first commit) */
+  abstract initializeRepo(): Promise<SyncResult>;
+
   /** Dispose resources */
   abstract dispose(): void;
 }

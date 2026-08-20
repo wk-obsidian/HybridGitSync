@@ -126,6 +126,114 @@ export class ApiBackend extends SyncBackend {
     }
   }
 
+  /**
+   * Check if the remote repository is empty (no commits, no branches)
+   */
+  async isEmptyRepo(): Promise<boolean> {
+    try {
+      await this.apiRequest('GET',
+        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+      );
+      return false; // Branch exists, repo is not empty
+    } catch (error) {
+      // 404 or 409 means empty repo (GitHub returns 409 "Git Repository is empty")
+      const msg = (error as Error).message || '';
+      if (msg.includes('404') || msg.includes('409')) {
+        this.log('Repository is empty (no branch refs found)');
+        return true;
+      }
+      // Other errors (network, auth) -> rethrow
+      throw error;
+    }
+  }
+
+  /**
+   * Initialize an empty repository by creating the first commit with .gitignore
+   */
+  async initializeRepo(): Promise<SyncResult> {
+    try {
+      console.log('[HybridGitSync] Initializing empty repository...');
+
+      // Get .gitignore content
+      const gitignoreContent = this.gitignore.getDefaultContent();
+      const base64Content = btoa(unescape(encodeURIComponent(gitignoreContent)));
+
+      if (this.config.provider === 'gitlab') {
+        // GitLab: use Commits API (creates branch automatically)
+        await this.initializeGitlabRepo(gitignoreContent);
+      } else {
+        // GitHub/Gitea: use Git Data API chain
+        await this.initializeGithubGiteaRepo(base64Content);
+      }
+
+      console.log('[HybridGitSync] Repository initialized successfully');
+      return {
+        success: true,
+        message: t('repo.initialized'),
+      };
+    } catch (error) {
+      const errorMsg = (error as Error).message || String(error);
+      console.error('[HybridGitSync] Failed to initialize repository:', errorMsg);
+      console.error('[HybridGitSync] Full error:', error);
+      return {
+        success: false,
+        message: t('repo.initFailed', { message: errorMsg }),
+        error: error as Error,
+      };
+    }
+  }
+
+  /**
+   * GitHub/Gitea: Use Contents API to create first file (auto-creates branch)
+   */
+  private async initializeGithubGiteaRepo(base64Content: string): Promise<void> {
+    // Use Contents API to create .gitignore - this auto-creates the default branch
+    console.log('[HybridGitSync] Creating .gitignore via Contents API...');
+    try {
+      // Don't specify branch - let GitHub/Gitea create the default branch automatically
+      const data = await this.apiRequest('PUT',
+        `/repos/${this.config.repo}/contents/.gitignore`,
+        {
+          message: 'Initial commit',
+          content: base64Content,
+        }
+      ) as { content: { sha: string } };
+      console.log('[HybridGitSync] Created .gitignore, sha:', data.content.sha);
+
+      // Now detect the actual default branch
+      const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
+      if (repoInfo.default_branch) {
+        this.config.branch = repoInfo.default_branch;
+        console.log('[HybridGitSync] Detected default branch:', this.config.branch);
+      }
+    } catch (error) {
+      console.error('[HybridGitSync] Error in initializeGithubGiteaRepo:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * GitLab: Commits API with actions array
+   */
+  private async initializeGitlabRepo(content: string): Promise<void> {
+    // GitLab uses project path encoded: owner/repo -> owner%2Frepo
+    const projectId = encodeURIComponent(this.config.repo);
+
+    await this.apiRequest('POST',
+      `/projects/${projectId}/repository/commits`,
+      {
+        branch: this.config.branch,
+        commit_message: 'Initial commit',
+        actions: [{
+          action: 'create',
+          file_path: '.gitignore',
+          content: content,
+        }],
+      }
+    );
+    this.log('GitLab: Created initial commit with .gitignore');
+  }
+
   async pull(): Promise<SyncResult> {
     try {
       // Clean up orphaned temp files first
@@ -543,51 +651,47 @@ export class ApiBackend extends SyncBackend {
       // Execute in parallel with concurrency limit
       await this.parallelLimit(pullPromises, 3);
 
-      // Step 10: Push new/modified local files (parallel, max 3)
-      const pushPromises = actions.pushToRemote
-        .filter(path => !this.shouldIgnore(path))
-        .map(async (path) => {
-          try {
-            const isBinary = isBinaryFile(path);
-            let content: string | ArrayBuffer;
-            let contentHash: string;
+      // Step 10: Push new/modified local files (sequential to avoid 409 conflicts)
+      const filesToPush = actions.pushToRemote.filter(path => !this.shouldIgnore(path));
+      for (const path of filesToPush) {
+        try {
+          const isBinary = isBinaryFile(path);
+          let content: string | ArrayBuffer;
+          let contentHash: string;
 
-            if (isBinary) {
-              content = await this.vault.adapter.readBinary(path);
-              // Check file size before uploading
-              if ((content as ArrayBuffer).byteLength > 50 * 1024 * 1024) {
-                console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize((content as ArrayBuffer).byteLength)})`);
-                return;
-              }
-              contentHash = await this.gitBlobSha1Binary(content as ArrayBuffer);
-            } else {
-              content = await this.vault.adapter.read(path);
-              // Check file size before uploading
-              if (this.isFileTooLarge(content as string)) {
-                const size = new TextEncoder().encode(content as string).length;
-                console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize(size)})`);
-                return;
-              }
-              contentHash = await this.gitBlobSha1(content as string);
+          if (isBinary) {
+            content = await this.vault.adapter.readBinary(path);
+            // Check file size before uploading
+            if ((content as ArrayBuffer).byteLength > 50 * 1024 * 1024) {
+              console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize((content as ArrayBuffer).byteLength)})`);
+              continue;
             }
-
-            const sha = remoteMap.get(path);
-            const newSha = await this.putFile(path, content, sha);
-            // Store content hash (SHA-1)
-            this.stateManager.setFileState(path, contentHash);
-            // Update cached remote SHA
-            this.stateManager.setRemoteSha(path, newSha);
-            pushed++;
-            this.log('Uploaded:', path);
-          } catch (e) {
-            const errMsg = `push ${path}: ${(e as Error).message}`;
-            errors.push(errMsg);
-            console.error('[HybridGitSync]', errMsg);
+            contentHash = await this.gitBlobSha1Binary(content as ArrayBuffer);
+          } else {
+            content = await this.vault.adapter.read(path);
+            // Check file size before uploading
+            if (this.isFileTooLarge(content as string)) {
+              const size = new TextEncoder().encode(content as string).length;
+              console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize(size)})`);
+              continue;
+            }
+            contentHash = await this.gitBlobSha1(content as string);
           }
-        });
 
-      // Execute in parallel with concurrency limit
-      await this.parallelLimit(pushPromises, 3);
+          const sha = remoteMap.get(path);
+          const newSha = await this.putFile(path, content, sha);
+          // Store content hash (SHA-1)
+          this.stateManager.setFileState(path, contentHash);
+          // Update cached remote SHA
+          this.stateManager.setRemoteSha(path, newSha);
+          pushed++;
+          this.log('Uploaded:', path);
+        } catch (e) {
+          const errMsg = `push ${path}: ${(e as Error).message}`;
+          errors.push(errMsg);
+          console.error('[HybridGitSync]', errMsg);
+        }
+      }
 
       // Step 11: Delete files that were deleted locally
       for (const path of actions.deleteFromRemote) {
@@ -892,10 +996,27 @@ export class ApiBackend extends SyncBackend {
     };
     if (sha) body.sha = sha;
 
-    const data = await this.apiRequest('PUT',
-      `/repos/${this.config.repo}/contents/${path}`, body
-    ) as PutFileResponse;
-    return data.content.sha;
+    // Retry logic for 409 Conflict errors (concurrent writes)
+    const maxRetries = 3;
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const data = await this.apiRequest('PUT',
+          `/repos/${this.config.repo}/contents/${path}`, body
+        ) as PutFileResponse;
+        return data.content.sha;
+      } catch (error) {
+        const msg = (error as Error).message || '';
+        if (msg.includes('409') && attempt < maxRetries - 1) {
+          // Wait before retry (exponential backoff: 1s, 2s, 4s)
+          const delay = Math.pow(2, attempt) * 1000;
+          this.log(`Conflict uploading ${path}, retrying in ${delay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new Error(`Failed to upload ${path} after ${maxRetries} attempts`);
   }
 
   async deleteFile(path: string, sha: string): Promise<void> {
@@ -948,29 +1069,40 @@ export class ApiBackend extends SyncBackend {
   async getRemoteTree(): Promise<Map<string, string>> {
     const fileMap = new Map<string, string>();
 
-    // Gitea returns an array, GitHub returns a single object
-    const refData = await this.apiRequest('GET',
-      `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
-    );
-    const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
+    try {
+      // Gitea returns an array, GitHub returns a single object
+      const refData = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+      );
+      const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
 
-    if (!branchInfo?.object?.sha) {
-      throw new Error(`Branch not found: ${this.config.branch}`);
-    }
-    const treeSha = branchInfo.object.sha;
+      if (!branchInfo?.object?.sha) {
+        throw new Error(`Branch not found: ${this.config.branch}`);
+      }
+      const treeSha = branchInfo.object.sha;
 
-    // Gitea uses ?recursive=true, GitHub uses ?recursive=1
-    const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
-    const tree = await this.apiRequest('GET',
-      `/repos/${this.config.repo}/git/trees/${treeSha}?${recursiveParam}`
-    ) as GitTreeResponse;
+      // Gitea uses ?recursive=true, GitHub uses ?recursive=1
+      const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
+      const tree = await this.apiRequest('GET',
+        `/repos/${this.config.repo}/git/trees/${treeSha}?${recursiveParam}`
+      ) as GitTreeResponse;
 
-    if (tree.tree) {
-      for (const item of tree.tree) {
-        if (item.type === 'blob') {
-          fileMap.set(item.path, item.sha);
+      if (tree.tree) {
+        for (const item of tree.tree) {
+          if (item.type === 'blob') {
+            fileMap.set(item.path, item.sha);
+          }
         }
       }
+    } catch (error) {
+      // 404 or 409 means empty repo (no branch refs) - return empty map
+      // GitHub returns 409 "Git Repository is empty" for empty repos
+      const msg = (error as Error).message || '';
+      if (msg.includes('404') || msg.includes('409')) {
+        this.log('Remote tree: empty repository (no branch refs)');
+        return fileMap;
+      }
+      throw error;
     }
 
     return fileMap;
@@ -1215,13 +1347,15 @@ export class ApiBackend extends SyncBackend {
   private async apiRequest(
     method: string,
     path: string,
-    body?: Record<string, string>
+    body?: Record<string, unknown>
   ): Promise<unknown> {
     const [pathPart, queryPart] = path.split('?');
     const encodedPath = pathPart.split('/').map(segment => encodeURIComponent(segment)).join('/');
     const url = queryPart
       ? `${this.baseUrl}${encodedPath}?${queryPart}`
       : `${this.baseUrl}${encodedPath}`;
+
+    console.log('[HybridGitSync] apiRequest:', method, url);
 
     const headers: Record<string, string> = {
       'Authorization': `token ${this.config.token}`,
@@ -1233,18 +1367,26 @@ export class ApiBackend extends SyncBackend {
       headers['Authorization'] = `Bearer ${this.config.token}`;
     }
 
-    const response: RequestUrlResponse = await requestUrl({
-      url,
-      method,
-      headers,
-      body: body ? JSON.stringify(body) : undefined,
-      throw: false,
-    });
+    try {
+      const response: RequestUrlResponse = await requestUrl({
+        url,
+        method,
+        headers,
+        body: body ? JSON.stringify(body) : undefined,
+        throw: false,
+      });
 
-    if (response.status >= 400) {
-      throw new Error(`API error ${response.status}: ${response.text}`);
+      console.log('[HybridGitSync] apiRequest response status:', response.status);
+
+      if (response.status >= 400) {
+        console.error('[HybridGitSync] apiRequest error:', response.status, response.text);
+        throw new Error(`API error ${response.status}: ${response.text}`);
+      }
+
+      return response.json;
+    } catch (error) {
+      console.error('[HybridGitSync] apiRequest exception:', error);
+      throw error;
     }
-
-    return response.json;
   }
 }

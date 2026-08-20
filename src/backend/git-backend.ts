@@ -260,6 +260,12 @@ export class GitBackend extends SyncBackend {
     }
   }
 
+  async initializeRepo(): Promise<SyncResult> {
+    // Git backend doesn't need special initialization
+    // User should have already run `git init` and `git remote add`
+    return { success: true, message: 'No initialization needed for git backend' };
+  }
+
   dispose(): void {
     // Nothing to dispose for native git
   }

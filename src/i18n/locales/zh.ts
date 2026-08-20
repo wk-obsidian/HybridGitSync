@@ -12,6 +12,11 @@ export default {
   'sync.skipped.emptyRemote': '远程返回空文件列表。跳过同步以防止数据丢失。',
   'sync.skipped.resolvingConflicts': '同步跳过：正在解决冲突',
 
+  // 仓库初始化
+  'repo.initializing': '正在初始化空仓库...',
+  'repo.initialized': '仓库已初始化，已创建 .gitignore',
+  'repo.initFailed': '仓库初始化失败：{message}',
+
   // 冲突消息
   'conflict.detected': '检测到 {count} 个冲突',
   'conflict.resolved': '已解决 {path}：{resolution}',

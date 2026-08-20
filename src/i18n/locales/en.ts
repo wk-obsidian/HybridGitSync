@@ -12,6 +12,11 @@ export default {
   'sync.skipped.emptyRemote': 'Remote returned empty file list. Skipping sync to prevent data loss.',
   'sync.skipped.resolvingConflicts': 'Sync skipped: resolving conflicts',
 
+  // Repository initialization
+  'repo.initializing': 'Initializing empty repository...',
+  'repo.initialized': 'Repository initialized with .gitignore',
+  'repo.initFailed': 'Failed to initialize repository: {message}',
+
   // Conflict messages
   'conflict.detected': '{count} conflict(s) detected',
   'conflict.resolved': 'Resolved {path}: {resolution}',
