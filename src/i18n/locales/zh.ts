@@ -182,7 +182,7 @@ export default {
   'settings.fileChangeDebounceDesc': '最后一次变更后等待的秒数',
   'settings.behavior': '行为',
   'settings.commitMessage': '提交消息',
-  'settings.commitMessageDesc': '提交消息模板。{{date}} = 当前日期时间',
+  'settings.commitMessageDesc': '提交消息模板。{{date}} = 当前日期时间，{{path}} = 文件路径',
   'settings.pullStrategy': '拉取策略',
   'settings.pullStrategyDesc': '如何整合远程变更',
   'settings.pullStrategyRebase': '变基（推荐）',

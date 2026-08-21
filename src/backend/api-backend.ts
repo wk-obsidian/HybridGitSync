@@ -16,6 +16,7 @@ interface ApiConfig {
   repo: string;       // "owner/repo"
   branch: string;     // default branch
   baseUrl?: string;   // custom API endpoint for self-hosted
+  commitMessage?: string; // commit message template with {{date}} and {{path}}
 }
 
 interface FileEntry {
@@ -989,8 +990,15 @@ export class ApiBackend extends SyncBackend {
       ? this.encodeBase64Binary(content)
       : this.encodeBase64Text(content);
 
+    // Build commit message from template
+    const now = new Date();
+    const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
+    const commitMessage = (this.config.commitMessage || 'sync: {{path}}')
+      .replace('{{date}}', dateStr)
+      .replace('{{path}}', path);
+
     const body: Record<string, string> = {
-      message: `sync: ${path}`,
+      message: commitMessage,
       content: base64Content,
       branch: this.config.branch,
     };

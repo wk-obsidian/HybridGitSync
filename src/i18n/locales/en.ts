@@ -182,7 +182,7 @@ export default {
   'settings.fileChangeDebounceDesc': 'Seconds to wait after last change before syncing',
   'settings.behavior': 'Behavior',
   'settings.commitMessage': 'Commit message',
-  'settings.commitMessageDesc': 'Template for commit messages. {{date}} = current datetime',
+  'settings.commitMessageDesc': 'Template for commit messages. {{date}} = current datetime, {{path}} = file path',
   'settings.pullStrategy': 'Pull strategy',
   'settings.pullStrategyDesc': 'How to integrate remote changes',
   'settings.pullStrategyRebase': 'Rebase (recommended)',
