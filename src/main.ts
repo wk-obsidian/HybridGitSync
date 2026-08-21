@@ -341,6 +341,16 @@ export default class HybridGitSyncPlugin extends Plugin {
           if (this.settings.showNotice) {
             this.showNotice(result.message || 'Sync completed');
           }
+          // Show skipped files notification
+          if (result.skipped && result.skipped.length > 0) {
+            const skippedMsg = result.skipped
+              .map(f => `${f.path} (${this.formatFileSize(f.size)})`)
+              .join('\n');
+            this.showNotice(t('sync.skippedFiles', {
+              count: String(result.skipped.length),
+              files: skippedMsg
+            }), 10000);
+          }
         } else {
           this.statusBar.setState('error', result.message);
           this.showNotice(`Sync failed: ${result.message}`);
@@ -943,6 +953,15 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   getPlatformName(): string {
     return getPlatformName();
+  }
+
+  /**
+   * Get file size in human readable format
+   */
+  private formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   }
 
   private showNotice(message: string, timeout?: number): void {

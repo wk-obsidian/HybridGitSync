@@ -32,6 +32,7 @@ export interface SyncResult {
   message: string;
   pulled?: number;
   pushed?: number;
+  skipped?: Array<{ path: string; size: number; reason: string }>;
   conflicts?: string[];
   error?: Error;
 }

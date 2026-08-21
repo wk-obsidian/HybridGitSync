@@ -31,6 +31,8 @@ export default {
   'file.deletedRemote': 'Deleted from remote: {path}',
   'file.deletedLocal': 'Deleted locally: {path}',
   'file.skippedLarge': 'Skipping large file: {path} ({size})',
+  'file.skippedLargeReason': 'File exceeds 100MB API limit',
+  'sync.skippedFiles': '{count} file(s) skipped (too large):\n{files}',
   'file.conflict': 'Conflict (different content): {path}',
   'file.sameContent': 'Same content on both sides: {path}',
   'file.remoteChanged': 'Remote changed, pulling: {path}',

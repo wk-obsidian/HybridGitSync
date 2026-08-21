@@ -31,6 +31,8 @@ export default {
   'file.deletedRemote': '已从远程删除：{path}',
   'file.deletedLocal': '已从本地删除：{path}',
   'file.skippedLarge': '跳过大文件：{path}（{size}）',
+  'file.skippedLargeReason': '文件超过 100MB API 限制',
+  'sync.skippedFiles': '{count} 个文件被跳过（过大）：\n{files}',
   'file.conflict': '冲突（内容不同）：{path}',
   'file.sameContent': '双方内容相同：{path}',
   'file.remoteChanged': '远程已更改，正在拉取：{path}',

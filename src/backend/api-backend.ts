@@ -385,6 +385,7 @@ export class ApiBackend extends SyncBackend {
       let pushed = 0;
       let deleted = 0;
       const errors: string[] = [];
+      const skippedFiles: Array<{ path: string; size: number; reason: string }> = [];
 
       // Step 0: Clean up orphaned temp files and initialize temp directory
       await this.tempFileManager.cleanup();
@@ -662,18 +663,21 @@ export class ApiBackend extends SyncBackend {
 
           if (isBinary) {
             content = await this.vault.adapter.readBinary(path);
-            // Check file size before uploading
-            if ((content as ArrayBuffer).byteLength > 50 * 1024 * 1024) {
-              console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize((content as ArrayBuffer).byteLength)})`);
+            // Check file size before uploading (100MB API limit)
+            if ((content as ArrayBuffer).byteLength > 100 * 1024 * 1024) {
+              const size = (content as ArrayBuffer).byteLength;
+              this.log(`Skipping large file: ${path} (${this.formatFileSize(size)})`);
+              skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
               continue;
             }
             contentHash = await this.gitBlobSha1Binary(content as ArrayBuffer);
           } else {
             content = await this.vault.adapter.read(path);
-            // Check file size before uploading
-            if (this.isFileTooLarge(content as string)) {
-              const size = new TextEncoder().encode(content as string).length;
-              console.warn(`[HybridGitSync] Skipping large file: ${path} (${this.formatFileSize(size)})`);
+            // Check file size before uploading (100MB API limit)
+            const size = new TextEncoder().encode(content as string).length;
+            if (size > 100 * 1024 * 1024) {
+              this.log(`Skipping large file: ${path} (${this.formatFileSize(size)})`);
+              skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
               continue;
             }
             contentHash = await this.gitBlobSha1(content as string);
@@ -749,6 +753,7 @@ export class ApiBackend extends SyncBackend {
         message,
         pulled,
         pushed,
+        skipped: skippedFiles.length > 0 ? skippedFiles : undefined,
         conflicts: actions.conflicts,
         error: errors.length > 0 ? new Error(errors.join('\n')) : undefined,
       };
