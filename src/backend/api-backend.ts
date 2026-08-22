@@ -771,7 +771,7 @@ export class ApiBackend extends SyncBackend {
       // Execute in parallel with concurrency limit
       await this.parallelLimit(pullPromises, 3);
 
-      // Step 10: Push all changes as a single commit using Git Data API
+      // Step 10: Push changes using Git Data API with batch processing
       const filesToPush = actions.pushToRemote.filter(path => !this.shouldIgnore(path));
       const filesToDelete = actions.deleteFromRemote.filter(path => !this.shouldIgnore(path));
 
@@ -782,96 +782,172 @@ export class ApiBackend extends SyncBackend {
             `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
           );
           const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
-          const currentCommitSha = branchInfo?.object?.sha;
+          let currentCommitSha = branchInfo?.object?.sha;
 
-          // Step 10a: Create blobs for all files (parallel with concurrency limit)
-          const blobPromises = filesToPush.map(async (path) => {
+          // Step 10a: Calculate file sizes and check for large files
+          const BATCH_SIZE_THRESHOLD = 100 * 1024 * 1024; // 100MB
+          const filesWithSize: Array<{ path: string; size: number }> = [];
+
+          for (const path of filesToPush) {
             try {
               const isBinary = isBinaryFile(path);
-              let content: string | ArrayBuffer;
+              let size: number;
 
               if (isBinary) {
-                content = await this.vault.adapter.readBinary(path);
-                if ((content as ArrayBuffer).byteLength > 100 * 1024 * 1024) {
-                  const size = (content as ArrayBuffer).byteLength;
-                  skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
-                  return null;
-                }
+                const content = await this.vault.adapter.readBinary(path);
+                size = (content as ArrayBuffer).byteLength;
               } else {
-                content = await this.vault.adapter.read(path);
-                const size = new TextEncoder().encode(content as string).length;
-                if (size > 100 * 1024 * 1024) {
-                  skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
-                  return null;
+                const content = await this.vault.adapter.read(path);
+                size = new TextEncoder().encode(content).length;
+              }
+
+              if (size > 100 * 1024 * 1024) {
+                skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
+              } else {
+                filesWithSize.push({ path, size });
+              }
+            } catch (e) {
+              errors.push(`size check ${path}: ${(e as Error).message}`);
+            }
+          }
+
+          // Step 10b: Split into batches based on total size
+          const batches: Array<Array<{ path: string; size: number }>> = [];
+          let currentBatch: Array<{ path: string; size: number }> = [];
+          let currentBatchSize = 0;
+
+          for (const file of filesWithSize) {
+            if (currentBatchSize + file.size > BATCH_SIZE_THRESHOLD && currentBatch.length > 0) {
+              batches.push(currentBatch);
+              currentBatch = [];
+              currentBatchSize = 0;
+            }
+            currentBatch.push(file);
+            currentBatchSize += file.size;
+          }
+          if (currentBatch.length > 0) {
+            batches.push(currentBatch);
+          }
+
+          this.log(`Split ${filesWithSize.length} files into ${batches.length} batches`);
+
+          // Step 10c: Process each batch
+          for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+            const batch = batches[batchIndex];
+            this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+
+            // Create blobs for this batch (parallel with concurrency limit)
+            const blobPromises = batch.map(async (file) => {
+              try {
+                const isBinary = isBinaryFile(file.path);
+                let content: string | ArrayBuffer;
+
+                if (isBinary) {
+                  content = await this.vault.adapter.readBinary(file.path);
+                } else {
+                  content = await this.vault.adapter.read(file.path);
+                }
+
+                const sha = await this.createBlob(content, isBinary);
+                const contentHash = isBinary
+                  ? await this.gitBlobSha1Binary(content as ArrayBuffer)
+                  : await this.gitBlobSha1(content as string);
+
+                return { path: file.path, sha, contentHash };
+              } catch (e) {
+                errors.push(`blob ${file.path}: ${(e as Error).message}`);
+                return null;
+              }
+            });
+
+            const blobs = (await this.parallelLimit(blobPromises, 5)).filter(Boolean);
+
+            // Get current tree to merge with new files
+            const currentTree = await this.apiRequest('GET',
+              `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
+            ) as GitTreeResponse;
+
+            // Build new tree: keep existing files + add new/modified files
+            const newFileMap = new Map(blobs.map(b => [b!.path, b!.sha]));
+            const treeItems = [];
+
+            // Keep existing files (except deleted ones and new files in this batch)
+            const deleteSet = new Set(filesToDelete);
+            if (currentTree.tree) {
+              for (const item of currentTree.tree) {
+                if (item.type === 'blob' && !deleteSet.has(item.path) && !newFileMap.has(item.path)) {
+                  treeItems.push({ path: item.path, sha: item.sha });
                 }
               }
-
-              const sha = await this.createBlob(content, isBinary);
-              const contentHash = isBinary
-                ? await this.gitBlobSha1Binary(content as ArrayBuffer)
-                : await this.gitBlobSha1(content as string);
-
-              return { path, sha, contentHash };
-            } catch (e) {
-              errors.push(`blob ${path}: ${(e as Error).message}`);
-              return null;
             }
-          });
 
-          const blobs = (await this.parallelLimit(blobPromises, 5)).filter(Boolean);
-
-          // Step 10b: Get current tree to merge with new files
-          const currentTree = await this.apiRequest('GET',
-            `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
-          ) as GitTreeResponse;
-
-          // Build new tree: keep existing files + add new/modified files
-          const deleteSet = new Set(filesToDelete);
-          const newFileMap = new Map(blobs.map(b => [b!.path, b!.sha]));
-
-          const treeItems = [];
-
-          // Keep existing files (except deleted ones and new files)
-          if (currentTree.tree) {
-            for (const item of currentTree.tree) {
-              if (item.type === 'blob' && !deleteSet.has(item.path) && !newFileMap.has(item.path)) {
-                treeItems.push({ path: item.path, sha: item.sha });
+            // Add new/modified files from this batch
+            for (const blob of blobs) {
+              if (blob) {
+                treeItems.push({ path: blob.path, sha: blob.sha });
               }
             }
-          }
 
-          // Add new/modified files
-          for (const blob of blobs) {
-            if (blob) {
-              treeItems.push({ path: blob.path, sha: blob.sha });
+            // Create tree
+            const treeSha = await this.createTree(treeItems, currentCommitSha);
+
+            // Create commit
+            const commitMessage = this.buildCommitMessage();
+            const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
+
+            // Update branch reference
+            await this.updateRef(this.config.branch, commitSha);
+
+            // Update state for all pushed files in this batch
+            for (const blob of blobs) {
+              if (blob) {
+                this.stateManager.setFileState(blob.path, blob.contentHash);
+                pushed++;
+              }
             }
+
+            // Update currentCommitSha for next batch
+            currentCommitSha = commitSha;
+            this.log(`Batch ${batchIndex + 1} complete: ${blobs.length} files pushed`);
           }
 
-          // Step 10c: Create tree
-          const treeSha = await this.createTree(treeItems, currentCommitSha);
+          // Step 10d: Handle deletions in a separate commit
+          if (filesToDelete.length > 0) {
+            this.log(`Processing ${filesToDelete.length} file deletions`);
 
-          // Step 10d: Create commit
-          const commitMessage = this.buildCommitMessage();
-          const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
+            // Get current tree after all batches
+            const currentTree = await this.apiRequest('GET',
+              `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
+            ) as GitTreeResponse;
 
-          // Step 10e: Update branch reference
-          await this.updateRef(this.config.branch, commitSha);
+            // Build new tree excluding deleted files
+            const deleteSet = new Set(filesToDelete);
+            const treeItems = [];
 
-          // Update state for all pushed files
-          for (const blob of blobs) {
-            if (blob) {
-              this.stateManager.setFileState(blob.path, blob.contentHash);
-              pushed++;
+            if (currentTree.tree) {
+              for (const item of currentTree.tree) {
+                if (item.type === 'blob' && !deleteSet.has(item.path)) {
+                  treeItems.push({ path: item.path, sha: item.sha });
+                }
+              }
             }
+
+            // Create tree, commit, and update ref
+            const treeSha = await this.createTree(treeItems, currentCommitSha);
+            const commitMessage = this.buildCommitMessage();
+            const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
+            await this.updateRef(this.config.branch, commitSha);
+
+            // Update state for deleted files
+            for (const path of filesToDelete) {
+              this.stateManager.removeFileState(path);
+              deleted++;
+            }
+
+            this.log(`Deletion commit complete: ${deleted} files deleted`);
           }
 
-          // Update state for deleted files
-          for (const path of filesToDelete) {
-            this.stateManager.removeFileState(path);
-            deleted++;
-          }
-
-          this.log(`Pushed ${pushed} files, deleted ${deleted} files in single commit`);
+          this.log(`Push complete: ${pushed} files pushed, ${deleted} files deleted`);
         } catch (e) {
           const errMsg = `batch push: ${(e as Error).message}`;
           errors.push(errMsg);
