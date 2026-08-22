@@ -843,48 +843,113 @@ export class ApiBackend extends SyncBackend {
           }
 
           this.log(`Split ${filesWithSize.length} files into ${batches.length} batches`);
-          this.log(`Provider: ${this.config.provider}, using ${this.config.provider === 'github' ? 'Git Data API (batch)' : 'Contents API (sequential)'}`);
+          this.log(`Provider: ${this.config.provider}`);
 
-          // Step 10c: Push files - route by provider
-          const useGitDataApi = this.config.provider === 'github';
+          // Step 10c & 10d: Push files and handle deletions - route by provider
+          if (this.config.provider === 'gitlab') {
+            // GitLab: Use Commits API (supports batch with actions array)
+            this.log('Using GitLab Commits API (batch)');
 
-          for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-            const batch = batches[batchIndex];
-            this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+            for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+              const batch = batches[batchIndex];
+              this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
 
-            // Read file contents first
-            const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
-            for (const file of batch) {
-              try {
-                const isBinary = isBinaryFile(file.path);
-                let content: string | ArrayBuffer;
+              // Read file contents
+              const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+              for (const file of batch) {
+                try {
+                  const isBinary = isBinaryFile(file.path);
+                  let content: string | ArrayBuffer;
 
-                if (isBinary) {
-                  content = await this.vault.adapter.readBinary(file.path);
-                } else {
-                  content = await this.vault.adapter.read(file.path);
+                  if (isBinary) {
+                    content = await this.vault.adapter.readBinary(file.path);
+                  } else {
+                    content = await this.vault.adapter.read(file.path);
+                  }
+
+                  const contentHash = isBinary
+                    ? await this.gitBlobSha1Binary(content as ArrayBuffer)
+                    : await this.gitBlobSha1(content as string);
+
+                  const textContent = isBinary
+                    ? this.encodeBase64Binary(content as ArrayBuffer)
+                    : content as string;
+
+                  filesWithContent.push({ path: file.path, content: textContent, contentHash });
+                } catch (e) {
+                  errors.push(`read ${file.path}: ${(e as Error).message}`);
                 }
+              }
 
-                const contentHash = isBinary
-                  ? await this.gitBlobSha1Binary(content as ArrayBuffer)
-                  : await this.gitBlobSha1(content as string);
+              if (filesWithContent.length === 0 && filesToDelete.length === 0) continue;
 
-                const textContent = isBinary
-                  ? this.encodeBase64Binary(content as ArrayBuffer)
-                  : content as string;
+              const commitMessage = this.buildCommitMessage();
 
-                filesWithContent.push({ path: file.path, content: textContent, contentHash });
-              } catch (e) {
-                errors.push(`read ${file.path}: ${(e as Error).message}`);
+              // For the last batch, include deletions
+              const isLastBatch = batchIndex === batches.length - 1;
+              const deletionsForBatch = isLastBatch ? filesToDelete : [];
+
+              const result = await this.batchCommitWithCommitsApi(
+                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                commitMessage,
+                deletionsForBatch
+              );
+
+              if (result.success) {
+                for (const file of filesWithContent) {
+                  this.stateManager.setFileState(file.path, file.contentHash);
+                  pushed++;
+                }
+                if (isLastBatch) {
+                  for (const path of filesToDelete) {
+                    this.stateManager.removeFileState(path);
+                    deleted++;
+                  }
+                }
+                this.log(`Batch ${batchIndex + 1} complete (Commits API): ${filesWithContent.length} pushed, ${deletionsForBatch.length} deleted`);
+              } else {
+                errors.push(`batch ${batchIndex + 1}: ${result.error}`);
               }
             }
+          } else if (this.config.provider === 'github') {
+            // GitHub: Use Git Data API (batch commit)
+            this.log('Using Git Data API (batch)');
 
-            if (filesWithContent.length === 0) continue;
+            for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+              const batch = batches[batchIndex];
+              this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
 
-            const commitMessage = this.buildCommitMessage();
+              // Read file contents
+              const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+              for (const file of batch) {
+                try {
+                  const isBinary = isBinaryFile(file.path);
+                  let content: string | ArrayBuffer;
 
-            if (useGitDataApi) {
-              // GitHub: Use Git Data API (batch commit)
+                  if (isBinary) {
+                    content = await this.vault.adapter.readBinary(file.path);
+                  } else {
+                    content = await this.vault.adapter.read(file.path);
+                  }
+
+                  const contentHash = isBinary
+                    ? await this.gitBlobSha1Binary(content as ArrayBuffer)
+                    : await this.gitBlobSha1(content as string);
+
+                  const textContent = isBinary
+                    ? this.encodeBase64Binary(content as ArrayBuffer)
+                    : content as string;
+
+                  filesWithContent.push({ path: file.path, content: textContent, contentHash });
+                } catch (e) {
+                  errors.push(`read ${file.path}: ${(e as Error).message}`);
+                }
+              }
+
+              if (filesWithContent.length === 0) continue;
+
+              const commitMessage = this.buildCommitMessage();
+
               const result = await this.batchCommitWithGitDataApi(
                 filesWithContent.map(f => ({ path: f.path, content: f.content })),
                 commitMessage
@@ -899,31 +964,11 @@ export class ApiBackend extends SyncBackend {
               } else {
                 errors.push(`batch ${batchIndex + 1}: ${result.error}`);
               }
-            } else {
-              // Gitea/GitLab: Use Contents API (one file at a time)
-              const result = await this.uploadFilesWithContentsApi(
-                filesWithContent.map(f => ({ path: f.path, content: f.content })),
-                commitMessage
-              );
-
-              if (result.success) {
-                for (const file of filesWithContent) {
-                  this.stateManager.setFileState(file.path, file.contentHash);
-                  pushed++;
-                }
-                this.log(`Batch ${batchIndex + 1} complete (Contents API): ${filesWithContent.length} files pushed`);
-              } else {
-                errors.push(`batch ${batchIndex + 1}: ${result.error}`);
-              }
             }
-          }
 
-          // Step 10d: Handle deletions - route by provider
-          if (filesToDelete.length > 0) {
-            this.log(`Processing ${filesToDelete.length} file deletions`);
-
-            if (useGitDataApi) {
-              // GitHub: Use Git Data API for deletions
+            // GitHub: Handle deletions separately with Git Data API
+            if (filesToDelete.length > 0) {
+              this.log(`Processing ${filesToDelete.length} file deletions`);
               try {
                 const currentTree = await this.apiRequest('GET',
                   `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
@@ -954,8 +999,65 @@ export class ApiBackend extends SyncBackend {
               } catch (e) {
                 errors.push(`delete commit: ${(e as Error).message}`);
               }
-            } else {
-              // Gitea/GitLab: Use Contents API for deletions
+            }
+          } else {
+            // Gitea: Use Contents API (one file at a time)
+            this.log('Using Contents API (sequential)');
+
+            for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+              const batch = batches[batchIndex];
+              this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
+
+              // Read file contents
+              const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+              for (const file of batch) {
+                try {
+                  const isBinary = isBinaryFile(file.path);
+                  let content: string | ArrayBuffer;
+
+                  if (isBinary) {
+                    content = await this.vault.adapter.readBinary(file.path);
+                  } else {
+                    content = await this.vault.adapter.read(file.path);
+                  }
+
+                  const contentHash = isBinary
+                    ? await this.gitBlobSha1Binary(content as ArrayBuffer)
+                    : await this.gitBlobSha1(content as string);
+
+                  const textContent = isBinary
+                    ? this.encodeBase64Binary(content as ArrayBuffer)
+                    : content as string;
+
+                  filesWithContent.push({ path: file.path, content: textContent, contentHash });
+                } catch (e) {
+                  errors.push(`read ${file.path}: ${(e as Error).message}`);
+                }
+              }
+
+              if (filesWithContent.length === 0) continue;
+
+              const commitMessage = this.buildCommitMessage();
+
+              const result = await this.uploadFilesWithContentsApi(
+                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                commitMessage
+              );
+
+              if (result.success) {
+                for (const file of filesWithContent) {
+                  this.stateManager.setFileState(file.path, file.contentHash);
+                  pushed++;
+                }
+                this.log(`Batch ${batchIndex + 1} complete (Contents API): ${filesWithContent.length} files pushed`);
+              } else {
+                errors.push(`batch ${batchIndex + 1}: ${result.error}`);
+              }
+            }
+
+            // Gitea: Handle deletions with Contents API
+            if (filesToDelete.length > 0) {
+              this.log(`Processing ${filesToDelete.length} file deletions`);
               for (const path of filesToDelete) {
                 try {
                   const fileData = await this.apiRequest<{ sha: string }>(
@@ -1375,6 +1477,69 @@ export class ApiBackend extends SyncBackend {
 
         await this.apiRequest('PUT', `/repos/${this.config.repo}/contents/${file.path}`, body);
       }
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Upload/delete files using GitLab Commits API (batch with actions array)
+   * Supports create, update, and delete in a single commit.
+   */
+  private async batchCommitWithCommitsApi(
+    files: { path: string; content: string }[],
+    commitMessage: string,
+    filesToDelete: string[] = []
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      const projectId = encodeURIComponent(this.config.repo);
+      const actions: Array<Record<string, unknown>> = [];
+
+      // Add create/update actions
+      for (const file of files) {
+        // Check if file exists to determine action type
+        const encodedFilePath = encodeURIComponent(file.path);
+        let action = 'create';
+        try {
+          await this.apiRequest('GET',
+            `/projects/${projectId}/repository/files/${encodedFilePath}?ref=${this.config.branch}`
+          );
+          action = 'update';
+        } catch {
+          action = 'create';
+        }
+
+        actions.push({
+          action,
+          file_path: file.path,
+          content: file.content,
+          encoding: 'text',
+        });
+      }
+
+      // Add delete actions
+      for (const path of filesToDelete) {
+        actions.push({
+          action: 'delete',
+          file_path: path,
+        });
+      }
+
+      if (actions.length === 0) {
+        return { success: true };
+      }
+
+      await this.apiRequest('POST',
+        `/projects/${projectId}/repository/commits`,
+        {
+          branch: this.config.branch,
+          commit_message: commitMessage,
+          actions,
+        }
+      );
+
       return { success: true };
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
