@@ -235,6 +235,124 @@ export class ApiBackend extends SyncBackend {
     this.log('GitLab: Created initial commit with .gitignore');
   }
 
+  // ===== Git Data API Methods =====
+
+  /**
+   * Create a blob for a file content
+   */
+  private async createBlob(content: string | ArrayBuffer, isBinary: boolean): Promise<string> {
+    const base64Content = isBinary
+      ? this.encodeBase64Binary(content)
+      : this.encodeBase64Text(content);
+
+    const data = await this.apiRequest('POST',
+      `/repos/${this.config.repo}/git/blobs`,
+      { content: base64Content, encoding: 'base64' }
+    ) as { sha: string };
+
+    return data.sha;
+  }
+
+  /**
+   * Create a tree with multiple files
+   */
+  private async createTree(
+    items: Array<{ path: string; sha: string; mode?: string }>,
+    baseTree?: string
+  ): Promise<string> {
+    const treeItems = items.map(item => ({
+      path: item.path,
+      mode: item.mode || '100644',
+      type: 'blob' as const,
+      sha: item.sha,
+    }));
+
+    const body: Record<string, unknown> = {
+      tree: treeItems,
+    };
+    if (baseTree) {
+      body.base_tree = baseTree;
+    }
+
+    const data = await this.apiRequest('POST',
+      `/repos/${this.config.repo}/git/trees`,
+      body
+    ) as { sha: string };
+
+    return data.sha;
+  }
+
+  /**
+   * Create a commit with the given tree
+   */
+  private async createCommit(
+    message: string,
+    treeSha: string,
+    parentSha?: string
+  ): Promise<string> {
+    const body: Record<string, unknown> = {
+      message,
+      tree: treeSha,
+    };
+    if (parentSha) {
+      body.parents = [parentSha];
+    }
+
+    const data = await this.apiRequest('POST',
+      `/repos/${this.config.repo}/git/commits`,
+      body
+    ) as { sha: string };
+
+    return data.sha;
+  }
+
+  /**
+   * Update branch reference to new commit
+   */
+  private async updateRef(branch: string, sha: string): Promise<void> {
+    await this.apiRequest('PATCH',
+      `/repos/${this.config.repo}/git/refs/heads/${branch}`,
+      { sha }
+    );
+  }
+
+  /**
+   * Build commit message from template
+   */
+  private buildCommitMessage(): string {
+    const now = new Date();
+    const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
+    return (this.config.commitMessage || 'vault backup: {{date}}')
+      .replace('{{date}}', dateStr)
+      .replace('{{path}}', 'batch');
+  }
+
+  /**
+   * Execute promises with concurrency limit
+   */
+  private async parallelLimit<T>(
+    promises: Promise<T>[],
+    limit: number
+  ): Promise<T[]> {
+    const results: T[] = [];
+    const executing = new Set<Promise<void>>();
+
+    for (const promise of promises) {
+      const p = promise.then(result => {
+        results.push(result);
+        executing.delete(p);
+      });
+      executing.add(p);
+
+      if (executing.size >= limit) {
+        await Promise.race(executing);
+      }
+    }
+
+    await Promise.all(executing);
+    return results;
+  }
+
   async pull(): Promise<SyncResult> {
     try {
       // Clean up orphaned temp files first
@@ -653,64 +771,111 @@ export class ApiBackend extends SyncBackend {
       // Execute in parallel with concurrency limit
       await this.parallelLimit(pullPromises, 3);
 
-      // Step 10: Push new/modified local files (sequential to avoid 409 conflicts)
+      // Step 10: Push all changes as a single commit using Git Data API
       const filesToPush = actions.pushToRemote.filter(path => !this.shouldIgnore(path));
-      for (const path of filesToPush) {
-        try {
-          const isBinary = isBinaryFile(path);
-          let content: string | ArrayBuffer;
-          let contentHash: string;
+      const filesToDelete = actions.deleteFromRemote.filter(path => !this.shouldIgnore(path));
 
-          if (isBinary) {
-            content = await this.vault.adapter.readBinary(path);
-            // Check file size before uploading (100MB API limit)
-            if ((content as ArrayBuffer).byteLength > 100 * 1024 * 1024) {
-              const size = (content as ArrayBuffer).byteLength;
-              this.log(`Skipping large file: ${path} (${this.formatFileSize(size)})`);
-              skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
-              continue;
+      if (filesToPush.length > 0 || filesToDelete.length > 0) {
+        try {
+          // Get current commit SHA
+          const refData = await this.apiRequest('GET',
+            `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+          );
+          const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
+          const currentCommitSha = branchInfo?.object?.sha;
+
+          // Step 10a: Create blobs for all files (parallel with concurrency limit)
+          const blobPromises = filesToPush.map(async (path) => {
+            try {
+              const isBinary = isBinaryFile(path);
+              let content: string | ArrayBuffer;
+
+              if (isBinary) {
+                content = await this.vault.adapter.readBinary(path);
+                if ((content as ArrayBuffer).byteLength > 100 * 1024 * 1024) {
+                  const size = (content as ArrayBuffer).byteLength;
+                  skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
+                  return null;
+                }
+              } else {
+                content = await this.vault.adapter.read(path);
+                const size = new TextEncoder().encode(content as string).length;
+                if (size > 100 * 1024 * 1024) {
+                  skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
+                  return null;
+                }
+              }
+
+              const sha = await this.createBlob(content, isBinary);
+              const contentHash = isBinary
+                ? await this.gitBlobSha1Binary(content as ArrayBuffer)
+                : await this.gitBlobSha1(content as string);
+
+              return { path, sha, contentHash };
+            } catch (e) {
+              errors.push(`blob ${path}: ${(e as Error).message}`);
+              return null;
             }
-            contentHash = await this.gitBlobSha1Binary(content as ArrayBuffer);
-          } else {
-            content = await this.vault.adapter.read(path);
-            // Check file size before uploading (100MB API limit)
-            const size = new TextEncoder().encode(content as string).length;
-            if (size > 100 * 1024 * 1024) {
-              this.log(`Skipping large file: ${path} (${this.formatFileSize(size)})`);
-              skippedFiles.push({ path, size, reason: t('file.skippedLargeReason') });
-              continue;
+          });
+
+          const blobs = (await this.parallelLimit(blobPromises, 5)).filter(Boolean);
+
+          // Step 10b: Get current tree to merge with new files
+          const currentTree = await this.apiRequest('GET',
+            `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
+          ) as GitTreeResponse;
+
+          // Build new tree: keep existing files + add new/modified files
+          const deleteSet = new Set(filesToDelete);
+          const newFileMap = new Map(blobs.map(b => [b!.path, b!.sha]));
+
+          const treeItems = [];
+
+          // Keep existing files (except deleted ones and new files)
+          if (currentTree.tree) {
+            for (const item of currentTree.tree) {
+              if (item.type === 'blob' && !deleteSet.has(item.path) && !newFileMap.has(item.path)) {
+                treeItems.push({ path: item.path, sha: item.sha });
+              }
             }
-            contentHash = await this.gitBlobSha1(content as string);
           }
 
-          const sha = remoteMap.get(path);
-          const newSha = await this.putFile(path, content, sha);
-          // Store content hash (SHA-1)
-          this.stateManager.setFileState(path, contentHash);
-          // Update cached remote SHA
-          this.stateManager.setRemoteSha(path, newSha);
-          pushed++;
-          this.log('Uploaded:', path);
-        } catch (e) {
-          const errMsg = `push ${path}: ${(e as Error).message}`;
-          errors.push(errMsg);
-          console.error('[HybridGitSync]', errMsg);
-        }
-      }
+          // Add new/modified files
+          for (const blob of blobs) {
+            if (blob) {
+              treeItems.push({ path: blob.path, sha: blob.sha });
+            }
+          }
 
-      // Step 11: Delete files that were deleted locally
-      for (const path of actions.deleteFromRemote) {
-        if (this.shouldIgnore(path)) continue;
-        try {
-          const sha = remoteMap.get(path);
-          if (sha) {
-            await this.deleteFile(path, sha);
+          // Step 10c: Create tree
+          const treeSha = await this.createTree(treeItems, currentCommitSha);
+
+          // Step 10d: Create commit
+          const commitMessage = this.buildCommitMessage();
+          const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
+
+          // Step 10e: Update branch reference
+          await this.updateRef(this.config.branch, commitSha);
+
+          // Update state for all pushed files
+          for (const blob of blobs) {
+            if (blob) {
+              this.stateManager.setFileState(blob.path, blob.contentHash);
+              pushed++;
+            }
+          }
+
+          // Update state for deleted files
+          for (const path of filesToDelete) {
             this.stateManager.removeFileState(path);
             deleted++;
-            this.log('Deleted from remote:', path);
           }
+
+          this.log(`Pushed ${pushed} files, deleted ${deleted} files in single commit`);
         } catch (e) {
-          errors.push(`delete remote ${path}: ${(e as Error).message}`);
+          const errMsg = `batch push: ${(e as Error).message}`;
+          errors.push(errMsg);
+          console.error('[HybridGitSync]', errMsg);
         }
       }
 
@@ -1242,28 +1407,6 @@ export class ApiBackend extends SyncBackend {
   }
 
   // ===== Private helpers =====
-
-  /**
-   * Execute promises in parallel with concurrency limit
-   */
-  private async parallelLimit(promises: Promise<void>[], limit: number): Promise<void> {
-    const results: Promise<void>[] = [];
-    const executing: Set<Promise<void>> = new Set();
-
-    for (const promise of promises) {
-      const p = promise.then(() => {
-        executing.delete(p);
-      });
-      executing.add(p);
-      results.push(p);
-
-      if (executing.size >= limit) {
-        await Promise.race(executing);
-      }
-    }
-
-    await Promise.all(results);
-  }
 
   /**
    * Check if file is too large for API
