@@ -1399,14 +1399,11 @@ export class ApiBackend extends SyncBackend {
 
       // Step 2: Create blobs for all files in parallel
       this.log('batchCommitWithGitDataApi: creating blobs...');
-      const blobResults = await this.parallelLimit(
-        files,
-        async (file) => {
-          const blobSha = await this.createBlob(file.content, false);
-          return { path: file.path, sha: blobSha };
-        },
-        5
-      );
+      const blobPromises = files.map(async (file) => {
+        const blobSha = await this.createBlob(file.content, false);
+        return { path: file.path, sha: blobSha };
+      });
+      const blobResults = await this.parallelLimit(blobPromises, 5);
       this.log('batchCommitWithGitDataApi: created', blobResults.length, 'blobs');
 
       // Step 3: Build tree entries
@@ -1424,13 +1421,13 @@ export class ApiBackend extends SyncBackend {
 
       // Step 5: Create commit
       this.log('batchCommitWithGitDataApi: creating commit...');
-      const commit = await this.createCommit(commitMessage, tree.sha, parentSha);
-      this.log('batchCommitWithGitDataApi: created commit', commit.sha);
+      const commit = await this.createCommit(commitMessage, tree, parentSha);
+      this.log('batchCommitWithGitDataApi: created commit', commit);
 
       // Step 6: Update ref (create or update)
       const branch = this.config.branch;
       const isCreate = !parentSha;
-      await this.updateRef(branch, commit.sha, isCreate);
+      await this.updateRef(branch, commit, isCreate);
       this.log('batchCommitWithGitDataApi: updated ref');
 
       return { success: true };

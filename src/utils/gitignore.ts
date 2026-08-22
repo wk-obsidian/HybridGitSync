@@ -118,15 +118,32 @@ Thumbs.db
 
   /**
    * Convert gitignore pattern to RegExp
+   *
+   * Git rules:
+   * - Pattern without "/" matches basename at any level (e.g. *.tmp matches a/b.tmp)
+   * - Pattern with "/" matches from root (e.g. a/b only matches a/b at root)
+   * - "**" prefix matches any directory prefix
    */
   private patternToRegex(pattern: string): RegExp {
-    let regexStr = '^';
+    let regexStr = '';
     let i = 0;
 
     // Handle directory-only patterns (ending with /)
     const dirOnly = pattern.endsWith('/');
     if (dirOnly) {
       pattern = pattern.slice(0, -1);
+    }
+
+    // Check if pattern contains `/` (excluding leading **/)
+    // If no `/`, it matches basename at any level
+    const hasSlash = pattern.includes('/');
+
+    if (hasSlash) {
+      // Pattern with `/` matches from root
+      regexStr += '^';
+    } else {
+      // Pattern without `/` matches basename at any level
+      regexStr += '(^|/)';
     }
 
     while (i < pattern.length) {
