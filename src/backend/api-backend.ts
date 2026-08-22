@@ -309,11 +309,18 @@ export class ApiBackend extends SyncBackend {
   /**
    * Update branch reference to new commit
    */
-  private async updateRef(branch: string, sha: string): Promise<void> {
-    await this.apiRequest('PATCH',
-      `/repos/${this.config.repo}/git/refs/heads/${branch}`,
-      { sha }
-    );
+  private async updateRef(branch: string, sha: string, isCreate: boolean = false): Promise<void> {
+    if (isCreate) {
+      await this.apiRequest('POST',
+        `/repos/${this.config.repo}/git/refs`,
+        { ref: `refs/heads/${branch}`, sha }
+      );
+    } else {
+      await this.apiRequest('PATCH',
+        `/repos/${this.config.repo}/git/refs/heads/${branch}`,
+        { sha }
+      );
+    }
   }
 
   /**
@@ -329,6 +336,7 @@ export class ApiBackend extends SyncBackend {
 
   /**
    * Execute promises with concurrency limit
+   * Stops on first rejection and propagates the error
    */
   private async parallelLimit<T>(
     promises: Promise<T>[],
@@ -341,6 +349,9 @@ export class ApiBackend extends SyncBackend {
       const p = promise.then(result => {
         results.push(result);
         executing.delete(p);
+      }).catch(err => {
+        executing.delete(p);
+        throw err;
       });
       executing.add(p);
 
@@ -349,7 +360,9 @@ export class ApiBackend extends SyncBackend {
       }
     }
 
-    await Promise.all(executing);
+    if (executing.size > 0) {
+      await Promise.all(executing);
+    }
     return results;
   }
 
@@ -830,14 +843,18 @@ export class ApiBackend extends SyncBackend {
           }
 
           this.log(`Split ${filesWithSize.length} files into ${batches.length} batches`);
+          this.log(`Provider: ${this.config.provider}, using ${this.config.provider === 'github' ? 'Git Data API (batch)' : 'Contents API (sequential)'}`);
 
-          // Step 10c: Process each batch
+          // Step 10c: Push files - route by provider
+          const useGitDataApi = this.config.provider === 'github';
+
           for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
             const batch = batches[batchIndex];
             this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
 
-            // Create blobs for this batch (parallel with concurrency limit)
-            const blobPromises = batch.map(async (file) => {
+            // Read file contents first
+            const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+            for (const file of batch) {
               try {
                 const isBinary = isBinaryFile(file.path);
                 let content: string | ArrayBuffer;
@@ -848,103 +865,112 @@ export class ApiBackend extends SyncBackend {
                   content = await this.vault.adapter.read(file.path);
                 }
 
-                const sha = await this.createBlob(content, isBinary);
                 const contentHash = isBinary
                   ? await this.gitBlobSha1Binary(content as ArrayBuffer)
                   : await this.gitBlobSha1(content as string);
 
-                return { path: file.path, sha, contentHash };
+                const textContent = isBinary
+                  ? this.encodeBase64Binary(content as ArrayBuffer)
+                  : content as string;
+
+                filesWithContent.push({ path: file.path, content: textContent, contentHash });
               } catch (e) {
-                errors.push(`blob ${file.path}: ${(e as Error).message}`);
-                return null;
-              }
-            });
-
-            const blobs = (await this.parallelLimit(blobPromises, 5)).filter(Boolean);
-
-            // Get current tree to merge with new files
-            const currentTree = await this.apiRequest('GET',
-              `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
-            ) as GitTreeResponse;
-
-            // Build new tree: keep existing files + add new/modified files
-            const newFileMap = new Map(blobs.map(b => [b!.path, b!.sha]));
-            const treeItems = [];
-
-            // Keep existing files (except deleted ones and new files in this batch)
-            const deleteSet = new Set(filesToDelete);
-            if (currentTree.tree) {
-              for (const item of currentTree.tree) {
-                if (item.type === 'blob' && !deleteSet.has(item.path) && !newFileMap.has(item.path)) {
-                  treeItems.push({ path: item.path, sha: item.sha });
-                }
+                errors.push(`read ${file.path}: ${(e as Error).message}`);
               }
             }
 
-            // Add new/modified files from this batch
-            for (const blob of blobs) {
-              if (blob) {
-                treeItems.push({ path: blob.path, sha: blob.sha });
-              }
-            }
+            if (filesWithContent.length === 0) continue;
 
-            // Create tree
-            const treeSha = await this.createTree(treeItems, currentCommitSha);
-
-            // Create commit
             const commitMessage = this.buildCommitMessage();
-            const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
 
-            // Update branch reference
-            await this.updateRef(this.config.branch, commitSha);
+            if (useGitDataApi) {
+              // GitHub: Use Git Data API (batch commit)
+              const result = await this.batchCommitWithGitDataApi(
+                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                commitMessage
+              );
 
-            // Update state for all pushed files in this batch
-            for (const blob of blobs) {
-              if (blob) {
-                this.stateManager.setFileState(blob.path, blob.contentHash);
-                pushed++;
+              if (result.success) {
+                for (const file of filesWithContent) {
+                  this.stateManager.setFileState(file.path, file.contentHash);
+                  pushed++;
+                }
+                this.log(`Batch ${batchIndex + 1} complete (Git Data API): ${filesWithContent.length} files pushed`);
+              } else {
+                errors.push(`batch ${batchIndex + 1}: ${result.error}`);
+              }
+            } else {
+              // Gitea/GitLab: Use Contents API (one file at a time)
+              const result = await this.uploadFilesWithContentsApi(
+                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                commitMessage
+              );
+
+              if (result.success) {
+                for (const file of filesWithContent) {
+                  this.stateManager.setFileState(file.path, file.contentHash);
+                  pushed++;
+                }
+                this.log(`Batch ${batchIndex + 1} complete (Contents API): ${filesWithContent.length} files pushed`);
+              } else {
+                errors.push(`batch ${batchIndex + 1}: ${result.error}`);
               }
             }
-
-            // Update currentCommitSha for next batch
-            currentCommitSha = commitSha;
-            this.log(`Batch ${batchIndex + 1} complete: ${blobs.length} files pushed`);
           }
 
-          // Step 10d: Handle deletions in a separate commit
+          // Step 10d: Handle deletions - route by provider
           if (filesToDelete.length > 0) {
             this.log(`Processing ${filesToDelete.length} file deletions`);
 
-            // Get current tree after all batches
-            const currentTree = await this.apiRequest('GET',
-              `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
-            ) as GitTreeResponse;
+            if (useGitDataApi) {
+              // GitHub: Use Git Data API for deletions
+              try {
+                const currentTree = await this.apiRequest('GET',
+                  `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
+                ) as GitTreeResponse;
 
-            // Build new tree excluding deleted files
-            const deleteSet = new Set(filesToDelete);
-            const treeItems = [];
+                const deleteSet = new Set(filesToDelete);
+                const treeItems = [];
 
-            if (currentTree.tree) {
-              for (const item of currentTree.tree) {
-                if (item.type === 'blob' && !deleteSet.has(item.path)) {
-                  treeItems.push({ path: item.path, sha: item.sha });
+                if (currentTree.tree) {
+                  for (const item of currentTree.tree) {
+                    if (item.type === 'blob' && !deleteSet.has(item.path)) {
+                      treeItems.push({ path: item.path, sha: item.sha });
+                    }
+                  }
+                }
+
+                const treeSha = await this.createTree(treeItems, currentCommitSha);
+                const commitMessage = this.buildCommitMessage();
+                const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
+                await this.updateRef(this.config.branch, commitSha);
+
+                for (const path of filesToDelete) {
+                  this.stateManager.removeFileState(path);
+                  deleted++;
+                }
+
+                this.log(`Deletion complete (Git Data API): ${deleted} files deleted`);
+              } catch (e) {
+                errors.push(`delete commit: ${(e as Error).message}`);
+              }
+            } else {
+              // Gitea/GitLab: Use Contents API for deletions
+              for (const path of filesToDelete) {
+                try {
+                  const fileData = await this.apiRequest<{ sha: string }>(
+                    'GET',
+                    `/repos/${this.config.repo}/contents/${path}`
+                  );
+                  await this.deleteFile(path, fileData.sha);
+                  this.stateManager.removeFileState(path);
+                  deleted++;
+                } catch (e) {
+                  errors.push(`delete ${path}: ${(e as Error).message}`);
                 }
               }
+              this.log(`Deletion complete (Contents API): ${deleted} files deleted`);
             }
-
-            // Create tree, commit, and update ref
-            const treeSha = await this.createTree(treeItems, currentCommitSha);
-            const commitMessage = this.buildCommitMessage();
-            const commitSha = await this.createCommit(commitMessage, treeSha, currentCommitSha);
-            await this.updateRef(this.config.branch, commitSha);
-
-            // Update state for deleted files
-            for (const path of filesToDelete) {
-              this.stateManager.removeFileState(path);
-              deleted++;
-            }
-
-            this.log(`Deletion commit complete: ${deleted} files deleted`);
           }
 
           this.log(`Push complete: ${pushed} files pushed, ${deleted} files deleted`);
@@ -1227,6 +1253,132 @@ export class ApiBackend extends SyncBackend {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('404')) return null;
       throw error;
+    }
+  }
+
+  /**
+   * Upload files using Git Data API (batch commit)
+   * Creates blobs, builds tree, commits, and updates ref in one atomic operation.
+   * Falls back to Contents API if Git Data API is not supported (e.g. Gitea).
+   *
+   * @returns { success, error? } - error indicates fallback should be tried
+   */
+  private async batchCommitWithGitDataApi(
+    files: { path: string; content: string }[],
+    commitMessage: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      this.log('batchCommitWithGitDataApi: starting with', files.length, 'files');
+
+      // Step 1: Get current tree hash (null for empty repo)
+      let baseTreeSha: string | null = null;
+      let parentSha: string | undefined;
+      try {
+        const refData = await this.apiRequest<{ object: { sha: string } }>(
+          'GET', `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+        );
+        parentSha = refData.object.sha;
+        const commitData = await this.apiRequest<{ tree: { sha: string } }>(
+          'GET', `/repos/${this.config.repo}/git/commits/${parentSha}`
+        );
+        baseTreeSha = commitData.tree.sha;
+        this.log('batchCommitWithGitDataApi: got base tree', baseTreeSha);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes('404') || msg.includes('409')) {
+          baseTreeSha = null;
+          parentSha = undefined;
+          this.log('batchCommitWithGitDataApi: empty repo (no base tree)');
+        } else {
+          this.log('batchCommitWithGitDataApi: error getting base tree:', msg);
+          throw e;
+        }
+      }
+
+      // Step 2: Create blobs for all files in parallel
+      this.log('batchCommitWithGitDataApi: creating blobs...');
+      const blobResults = await this.parallelLimit(
+        files,
+        async (file) => {
+          const blobSha = await this.createBlob(file.content, false);
+          return { path: file.path, sha: blobSha };
+        },
+        5
+      );
+      this.log('batchCommitWithGitDataApi: created', blobResults.length, 'blobs');
+
+      // Step 3: Build tree entries
+      const treeEntries: TreeEntry[] = blobResults.map((blob) => ({
+        path: blob.path,
+        mode: '100644' as const,
+        type: 'blob' as const,
+        sha: blob.sha,
+      }));
+
+      // Step 4: Create tree (with base tree if available)
+      this.log('batchCommitWithGitDataApi: creating tree...');
+      const tree = await this.createTree(treeEntries, baseTreeSha || undefined);
+      this.log('batchCommitWithGitDataApi: created tree', tree);
+
+      // Step 5: Create commit
+      this.log('batchCommitWithGitDataApi: creating commit...');
+      const commit = await this.createCommit(commitMessage, tree.sha, parentSha);
+      this.log('batchCommitWithGitDataApi: created commit', commit.sha);
+
+      // Step 6: Update ref (create or update)
+      const branch = this.config.branch;
+      const isCreate = !parentSha;
+      await this.updateRef(branch, commit.sha, isCreate);
+      this.log('batchCommitWithGitDataApi: updated ref');
+
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      const stack = e instanceof Error ? e.stack : '';
+      this.log('batchCommitWithGitDataApi: failed with error:', msg);
+      if (stack) {
+        this.log('batchCommitWithGitDataApi: stack:', stack.substring(0, 500));
+      }
+      return { success: false, error: msg };
+    }
+  }
+
+  /**
+   * Upload files using Contents API (one file at a time)
+   * Fallback when Git Data API is not supported.
+   */
+  private async uploadFilesWithContentsApi(
+    files: { path: string; content: string }[],
+    commitMessage: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      for (const file of files) {
+        let existingSha: string | undefined;
+        try {
+          const existing = await this.apiRequest<{ sha: string }>(
+            'GET',
+            `/repos/${this.config.repo}/contents/${file.path}`
+          );
+          existingSha = existing.sha;
+        } catch {
+          existingSha = undefined;
+        }
+
+        const body: Record<string, unknown> = {
+          message: commitMessage,
+          content: this.encodeBase64Text(file.content),
+          branch: this.config.branch,
+        };
+        if (existingSha) {
+          body.sha = existingSha;
+        }
+
+        await this.apiRequest('PUT', `/repos/${this.config.repo}/contents/${file.path}`, body);
+      }
+      return { success: true };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { success: false, error: msg };
     }
   }
 
@@ -1611,8 +1763,9 @@ export class ApiBackend extends SyncBackend {
       console.log('[HybridGitSync] apiRequest response status:', response.status);
 
       if (response.status >= 400) {
-        console.error('[HybridGitSync] apiRequest error:', response.status, response.text);
-        throw new Error(`API error ${response.status}: ${response.text}`);
+        const errorText = response.text || '';
+        console.error('[HybridGitSync] apiRequest error:', response.status, errorText);
+        throw new Error(`API error ${response.status}: ${errorText}`);
       }
 
       return response.json;
