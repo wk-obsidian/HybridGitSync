@@ -388,7 +388,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     const conflicts: ConflictInfo[] = [];
 
     // Get current remote file tree
-    const remoteMap = await apiBackend.getRemoteTree();
+    const { tree: remoteMap } = await apiBackend.getRemoteTree();
 
     // Check each known file
     for (const [path, storedHash] of knownFiles) {

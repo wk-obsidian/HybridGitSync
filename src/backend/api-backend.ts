@@ -63,6 +63,7 @@ interface CommitDetail {
     status: string;
     additions: number;
     deletions: number;
+    previousPath?: string; // for renames: the old path before rename
   }>;
 }
 
@@ -528,8 +529,11 @@ export class ApiBackend extends SyncBackend {
 
       // Step 2: Get current remote file tree (single API call)
       let remoteMap: Map<string, string>;
+      let currentHeadSha: string;
       try {
-        remoteMap = await this.getRemoteTree();
+        const result = await this.getRemoteTree();
+        remoteMap = result.tree;
+        currentHeadSha = result.headSha;
         this.log('Remote files:', remoteMap.size);
       } catch (error) {
         // Network error or API error
@@ -582,6 +586,50 @@ export class ApiBackend extends SyncBackend {
         deleted: deletedRemoteFiles.size,
       });
 
+      // Step 4.5: Detect renames (SHA matching + commit API fallback)
+      const renames: Map<string, string> = new Map(); // oldPath -> newPath
+
+      // Phase 1: SHA-based matching (free, no API calls)
+      // If a deleted file's SHA matches a new file's SHA, it's a rename with same content
+      for (const deletedPath of deletedRemoteFiles) {
+        const deletedSha = cachedRemoteShas.get(deletedPath);
+        if (!deletedSha) continue;
+        for (const newPath of newRemoteFiles) {
+          if (renames.has(deletedPath)) break; // already matched
+          const newSha = remoteMap.get(newPath);
+          if (newSha === deletedSha) {
+            renames.set(deletedPath, newPath);
+          }
+        }
+      }
+
+      // Phase 2: Commit API fallback (for renames with content changes)
+      const unmatchedDeleted = [...deletedRemoteFiles].filter(p => !renames.has(p));
+      const unmatchedNew = [...newRemoteFiles].filter(p => ![...renames.values()].includes(p));
+
+      if (unmatchedDeleted.length > 0 && unmatchedNew.length > 0) {
+        const lastHeadSha = this.stateManager.getLastSyncHeadSha();
+        if (lastHeadSha && currentHeadSha) {
+          this.log('Checking commit API for renames with content changes...');
+          const renameInfos = await this.compareCommits(lastHeadSha, currentHeadSha);
+          for (const info of renameInfos) {
+            if (unmatchedDeleted.includes(info.fromPath) && unmatchedNew.includes(info.toPath)) {
+              // Verify neither path is already matched
+              if (!renames.has(info.fromPath) && ![...renames.values()].includes(info.toPath)) {
+                renames.set(info.fromPath, info.toPath);
+              }
+            }
+          }
+        }
+      }
+
+      // Remove detected renames from delete/create sets
+      for (const [oldPath, newPath] of renames) {
+        deletedRemoteFiles.delete(oldPath);
+        newRemoteFiles.delete(newPath);
+        this.log(`Rename detected: ${oldPath} → ${newPath}`);
+      }
+
       // Step 5: Get current local file list with content hash
       const localFiles = await this.listLocalFiles('');
       const localMap = new Map<string, string>(); // path -> content hash
@@ -597,6 +645,28 @@ export class ApiBackend extends SyncBackend {
         } catch { /* skip files that can't be read */ }
       }
       this.log('Local files:', localMap.size);
+
+      // Step 5.5: Apply renames locally (after localMap is built)
+      for (const [oldPath, newPath] of renames) {
+        if (localMap.has(oldPath)) {
+          try {
+            const abstractFile = this.vault.getAbstractFileByPath(oldPath);
+            if (abstractFile) {
+              await this.vault.rename(abstractFile, newPath);
+              this.log(`Local rename: ${oldPath} → ${newPath}`);
+            }
+            // Update localMap to reflect the rename
+            localMap.set(newPath, localMap.get(oldPath)!);
+            localMap.delete(oldPath);
+          } catch (error) {
+            this.logger.warn(`Local rename failed for ${oldPath} → ${newPath}:`, error);
+            // Fall back to delete + pull
+            deletedRemoteFiles.add(oldPath);
+            newRemoteFiles.add(newPath);
+            renames.delete(oldPath);
+          }
+        }
+      }
 
       // Step 6: Detect local changes
       this.log('Detecting changes...');
@@ -1102,6 +1172,7 @@ export class ApiBackend extends SyncBackend {
         remoteShas[path] = sha;
       }
       this.stateManager.setAllRemoteShas(remoteShas);
+      this.stateManager.setLastSyncHeadSha(currentHeadSha);
 
       // Step 14: Save sync state
       await this.stateManager.save();
@@ -1634,7 +1705,7 @@ export class ApiBackend extends SyncBackend {
    * Get remote file tree with SHAs using Git Tree API (single API call)
    * This is much more efficient than fetching each file individually
    */
-  async getRemoteTree(): Promise<Map<string, string>> {
+  async getRemoteTree(): Promise<{ tree: Map<string, string>; headSha: string }> {
     const fileMap = new Map<string, string>();
 
     try {
@@ -1647,12 +1718,12 @@ export class ApiBackend extends SyncBackend {
       if (!branchInfo?.object?.sha) {
         throw new Error(`Branch not found: ${this.config.branch}`);
       }
-      const treeSha = branchInfo.object.sha;
+      const headSha = branchInfo.object.sha;
 
       // Gitea uses ?recursive=true, GitHub uses ?recursive=1
       const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
       const tree = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/git/trees/${treeSha}?${recursiveParam}`
+        `/repos/${this.config.repo}/git/trees/${headSha}?${recursiveParam}`
       ) as GitTreeResponse;
 
       if (tree.tree) {
@@ -1662,18 +1733,18 @@ export class ApiBackend extends SyncBackend {
           }
         }
       }
+
+      return { tree: fileMap, headSha };
     } catch (error) {
       // 404 or 409 means empty repo (no branch refs) - return empty map
       // GitHub returns 409 "Git Repository is empty" for empty repos
       const msg = (error as Error).message || '';
       if (msg.includes('404') || msg.includes('409')) {
         this.log('Remote tree: empty repository (no branch refs)');
-        return fileMap;
+        return { tree: fileMap, headSha: '' };
       }
       throw error;
     }
-
-    return fileMap;
   }
 
   // ===== History Methods =====
@@ -1726,12 +1797,61 @@ export class ApiBackend extends SyncBackend {
           status: f.status as string,
           additions: f.additions as number,
           deletions: f.deletions as number,
+          previousPath: f.previous_filename as string | undefined,
         })),
       };
     } catch (error) {
       console.error('[HybridGitSync] Failed to get commit details:', error);
       return null;
     }
+  }
+
+  /**
+   * Compare two commits and return rename information.
+   * Uses the compare API for GitHub/Gitea, falls back to per-commit details for GitLab.
+   */
+  async compareCommits(baseSha: string, headSha: string): Promise<Array<{ fromPath: string; toPath: string }>> {
+    const renames: Array<{ fromPath: string; toPath: string }> = [];
+
+    try {
+      if (this.config.provider === 'gitlab') {
+        // GitLab doesn't have a compare API that returns renames directly.
+        // Get the list of commits between base and head, then check each for renames.
+        const commits = await this.getCommitHistory(100);
+        // Filter commits that are after baseSha
+        const baseIndex = commits.findIndex(c => c.sha === baseSha);
+        const relevantCommits = baseIndex > 0 ? commits.slice(0, baseIndex) : commits;
+
+        for (const commit of relevantCommits) {
+          const detail = await this.getCommitDetails(commit.sha);
+          if (!detail) continue;
+          for (const file of detail.files) {
+            if (file.status === 'renamed' && file.previousPath) {
+              renames.push({ fromPath: file.previousPath, toPath: file.path });
+            }
+          }
+        }
+      } else {
+        // GitHub and Gitea support the compare API with previous_filename
+        const data = await this.apiRequest('GET',
+          `/repos/${this.config.repo}/compare/${baseSha}...${headSha}`
+        ) as Record<string, unknown>;
+
+        const files = (data.files as Array<Record<string, unknown>>) || [];
+        for (const file of files) {
+          if (file.status === 'renamed' && file.previous_filename) {
+            renames.push({
+              fromPath: file.previous_filename as string,
+              toPath: file.filename as string,
+            });
+          }
+        }
+      }
+    } catch (error) {
+      console.error('[HybridGitSync] Failed to compare commits:', error);
+    }
+
+    return renames;
   }
 
   /**

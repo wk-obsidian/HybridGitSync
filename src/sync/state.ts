@@ -7,6 +7,7 @@ export interface SyncState {
   lastSyncTime: string;
   files: Record<string, string>; // path -> content hash
   remoteShas: Record<string, string>; // path -> remote git blob SHA (cached)
+  lastSyncHeadSha?: string; // HEAD SHA at last sync, for compare API rename detection
 }
 
 /**
@@ -128,6 +129,20 @@ export class SyncStateManager {
    */
   setAllRemoteShas(shas: Record<string, string>): void {
     this.state.remoteShas = shas;
+  }
+
+  /**
+   * Get the HEAD SHA from last sync (for compare API rename detection)
+   */
+  getLastSyncHeadSha(): string | undefined {
+    return this.state.lastSyncHeadSha;
+  }
+
+  /**
+   * Set the HEAD SHA at sync time
+   */
+  setLastSyncHeadSha(sha: string): void {
+    this.state.lastSyncHeadSha = sha;
   }
 
   /**
