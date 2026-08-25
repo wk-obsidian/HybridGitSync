@@ -199,6 +199,11 @@ export default {
   'settings.advanced': 'Advanced',
   'settings.debugMode': 'Debug mode',
   'settings.debugModeDesc': 'Enable verbose logging in developer console',
+  'settings.clearSyncState': 'Clear sync state',
+  'settings.clearSyncStateDesc': 'Reset sync tracking to fix sync issues. Next sync will be a full comparison.',
+  'settings.clearSyncStateButton': 'Clear Sync State',
+  'settings.clearSyncStateConfirmTitle': 'Clear Sync State',
+  'settings.clearSyncStateConfirmDesc': 'This will reset the sync state file. The next sync will perform a full comparison between local and remote files. Local files will NOT be deleted. Continue?',
 
   // Notices
   'notice.oauthInstructions': 'Visit GitHub and enter the code shown',

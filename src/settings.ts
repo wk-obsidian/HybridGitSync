@@ -1,9 +1,60 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Modal, Notice, PluginSettingTab, Setting } from 'obsidian';
 import type HybridGitSyncPlugin from './main';
 import { t } from './i18n';
 import { requestDeviceCode, pollForAccessToken, listRepos } from './auth/github-oauth';
 import { OAuthModal } from './auth/oauth-modal';
 import { GitignoreRules } from './utils/gitignore';
+
+/**
+ * Confirmation modal for clearing sync state
+ */
+class ConfirmModal extends Modal {
+  private title: string;
+  private message: string;
+  private confirmText: string;
+  private onConfirm: () => Promise<void>;
+
+  constructor(app: App, title: string, message: string, confirmText: string, onConfirm: () => Promise<void>) {
+    super(app);
+    this.title = title;
+    this.message = message;
+    this.confirmText = confirmText;
+    this.onConfirm = onConfirm;
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+
+    contentEl.createEl('h2', { text: this.title });
+    contentEl.createEl('p', { text: this.message });
+
+    const buttonEl = contentEl.createDiv('modal-button-container');
+    buttonEl.style.display = 'flex';
+    buttonEl.style.justifyContent = 'flex-end';
+    buttonEl.style.gap = '8px';
+    buttonEl.style.marginTop = '16px';
+
+    // Cancel button
+    const cancelBtn = buttonEl.createEl('button');
+    cancelBtn.textContent = t('ui.cancel');
+    cancelBtn.onclick = () => this.close();
+
+    // Confirm button
+    const confirmBtn = buttonEl.createEl('button');
+    confirmBtn.textContent = this.confirmText;
+    confirmBtn.addClass('mod-warning');
+    confirmBtn.onclick = async () => {
+      await this.onConfirm();
+      this.close();
+    };
+  }
+
+  onClose(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+  }
+}
 
 export interface PluginSettings {
   // Backend
@@ -364,6 +415,25 @@ export class SettingsTab extends PluginSettingTab {
         .onChange(async (value) => {
           this.plugin.settings.debug = value;
           await this.plugin.saveSettings();
+        }));
+
+    // Clear sync state
+    new Setting(el)
+      .setName(t('settings.clearSyncState'))
+      .setDesc(t('settings.clearSyncStateDesc'))
+      .addButton(cb => cb
+        .setButtonText(t('settings.clearSyncStateButton'))
+        .setWarning()
+        .onClick(() => {
+          new ConfirmModal(
+            this.app,
+            t('settings.clearSyncStateConfirmTitle'),
+            t('settings.clearSyncStateConfirmDesc'),
+            t('settings.clearSyncStateButton'),
+            async () => {
+              await this.plugin.clearSyncState();
+            }
+          ).open();
         }));
   }
 

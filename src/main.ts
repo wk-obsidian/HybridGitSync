@@ -745,7 +745,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   // ===== Sync State =====
 
-  private async clearSyncState(): Promise<void> {
+  async clearSyncState(): Promise<void> {
     if (this.backend instanceof ApiBackend) {
       const stateManager = (this.backend as ApiBackend).getStateManager();
       stateManager.clear();

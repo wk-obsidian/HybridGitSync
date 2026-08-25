@@ -199,6 +199,11 @@ export default {
   'settings.advanced': '高级',
   'settings.debugMode': '调试模式',
   'settings.debugModeDesc': '在开发者控制台启用详细日志',
+  'settings.clearSyncState': '清除同步状态',
+  'settings.clearSyncStateDesc': '重置同步追踪以修复同步问题。下次同步将进行完整比较。',
+  'settings.clearSyncStateButton': '清除同步状态',
+  'settings.clearSyncStateConfirmTitle': '清除同步状态',
+  'settings.clearSyncStateConfirmDesc': '这将重置同步状态文件。下次同步时将对本地和远程文件进行完整比较。本地文件不会被删除。是否继续？',
 
   // 通知
   'notice.oauthInstructions': '请访问 GitHub 并输入显示的代码',
