@@ -27,7 +27,7 @@ export class OAuthModal extends Modal {
 
     // Code display (large, easy to read, selectable)
     const codeEl = contentEl.createDiv('oauth-code');
-    const codeSpan = codeEl.createEl('span', { text: this.userCode, cls: 'oauth-code-text' });
+    codeEl.createSpan({ text: this.userCode, cls: 'oauth-code-text' });
 
     // Copy button
     const copyRow = contentEl.createDiv('oauth-copy-row');
@@ -41,7 +41,7 @@ export class OAuthModal extends Modal {
 
     // URL
     contentEl.createEl('p', { text: t('oauth.step2') });
-    const linkEl = contentEl.createEl('a', {
+    contentEl.createEl('a', {
       text: this.verificationUri,
       href: this.verificationUri,
       cls: 'oauth-link',

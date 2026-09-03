@@ -3,14 +3,14 @@ import { PluginSettings, SettingsTab, DEFAULT_SETTINGS, ConfirmModal } from './s
 import { getErrorMessage } from './utils/error';
 import { SyncBackend } from './backend/base';
 import { GitBackend } from './backend/git-backend';
-import { ApiBackend, ApiProvider } from './backend/api-backend';
+import { ApiBackend } from './backend/api-backend';
 import { StatusBar } from './ui/status-bar';
 import { ConflictModal } from './ui/conflict-modal';
 import { HistoryView, HISTORY_VIEW_TYPE } from './ui/history-view';
 import { DiffView, DIFF_VIEW_TYPE } from './ui/diff-view';
 import { ChangesView, CHANGES_VIEW_TYPE } from './ui/changes-view';
 import { ConflictResolver, ConflictInfo } from './sync/conflict';
-import type { DiffResult } from './utils/diff';
+import type { ConflictDiff } from './sync/conflict';
 import { SyncQueue } from './sync/queue';
 import { NetworkStatus } from './utils/network';
 import { isBinaryFile } from './utils/binary';
@@ -19,6 +19,34 @@ import { Logger, LogLevel } from './utils/logger';
 import { SettingsIO } from './utils/settings-io';
 import { getPlatformName } from './utils/platform';
 import { t, initI18n } from './i18n';
+
+/** Commit shape rendered by the history view (file list normalized to paths) */
+interface HistoryCommit {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  files: string[];
+}
+
+/** Sources accepted for the history view: backend list commits and detail commits */
+interface HistoryCommitSource {
+  sha: string;
+  message: string;
+  author: string;
+  date: string;
+  files?: Array<string | { path: string }>;
+}
+
+function toHistoryCommit(c: HistoryCommitSource): HistoryCommit {
+  return {
+    sha: c.sha,
+    message: c.message,
+    author: c.author,
+    date: c.date,
+    files: (c.files ?? []).map(f => (typeof f === 'string' ? f : f.path)),
+  };
+}
 
 export default class HybridGitSyncPlugin extends Plugin {
   settings!: PluginSettings;
@@ -50,7 +78,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.settingsIO = new SettingsIO(this.app.vault);
     this.syncQueue = new SyncQueue(this.settings.fileChangeDebounce * 1000);
     this.network = new NetworkStatus();
-    this.gitignore = new GitignoreRules();
+    this.gitignore = new GitignoreRules(this.app.vault.configDir);
 
     // Initialize UI
     this.statusBar = new StatusBar(this.addStatusBarItem());
@@ -109,7 +137,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     // Sync on startup
     if (this.settings.syncOnStartup && this.network.isOnline()) {
-      window.setTimeout(() => this.performSync(), 5000);
+      window.setTimeout(() => void this.performSync(), 5000);
     }
 
     this.log('Plugin loaded', `Platform: ${getPlatformName()}, Backend: ${this.getActiveBackendName()}`);
@@ -123,7 +151,8 @@ export default class HybridGitSyncPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const data = (await this.loadData() as Partial<PluginSettings> | null | undefined) ?? {};
+    this.settings = { ...DEFAULT_SETTINGS, ...data };
   }
 
   async saveSettings(): Promise<void> {
@@ -222,7 +251,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private createApiBackend(): ApiBackend {
     return new ApiBackend(this.app.vault, {
-      provider: this.settings.apiProvider as ApiProvider,
+      provider: this.settings.apiProvider,
       token: this.settings.apiToken,
       repo: this.settings.remoteUrl,
       branch: this.settings.branch,
@@ -514,7 +543,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   private async checkConflicts(): Promise<ConflictInfo[]> {
     if (!(this.backend instanceof ApiBackend)) return [];
 
-    const apiBackend = this.backend as ApiBackend;
+    const apiBackend = this.backend;
     const stateManager = apiBackend.getStateManager();
 
     // Load sync state
@@ -596,6 +625,8 @@ export default class HybridGitSyncPlugin extends Plugin {
    * Only shows one modal at a time, pauses sync queue
    */
   private async handleConflicts(conflicts: ConflictInfo[]): Promise<void> {
+    if (!(this.backend instanceof ApiBackend)) return;
+
     // Set flag to prevent sync while resolving
     this.isResolvingConflicts = true;
     this.pauseFileChangeSync = true;
@@ -603,7 +634,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.statusBar.setState('conflict', `${conflicts.length} conflict(s)`);
 
     // Get the stateManager from the API backend
-    const apiBackend = this.backend as ApiBackend;
+    const apiBackend = this.backend;
     const stateManager = apiBackend.getStateManager();
     const resolver = new ConflictResolver(this.app.vault, apiBackend, stateManager);
 
@@ -622,7 +653,12 @@ export default class HybridGitSyncPlugin extends Plugin {
       }
 
       const conflict = conflicts[current];
-      const diff = resolver.generateDiff(conflict.localContent, conflict.remoteContent);
+      // Only text files can be diffed; binary conflicts show an empty diff
+      const diff: ConflictDiff =
+        typeof conflict.localContent === 'string' &&
+        typeof conflict.remoteContent === 'string'
+          ? resolver.generateDiff(conflict.localContent, conflict.remoteContent)
+          : { changes: [], added: 0, removed: 0, modified: 0 };
 
       new ConflictModal(this.app, conflict, diff, async (resolution) => {
         await resolver.resolve(conflict, resolution);
@@ -838,7 +874,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     this.addCommand({
       id: 'export-settings',
       name: 'Export settings',
-      callback: () => this.exportSettings(),
+      callback: () => void this.exportSettings(),
     });
 
     this.addCommand({
@@ -865,7 +901,9 @@ export default class HybridGitSyncPlugin extends Plugin {
   private showLogs(): void {
     const logs = this.logger.getLogsAsString();
     new Notice(t('notice.logsCopied'), 5000);
-    navigator.clipboard.writeText(logs);
+    void navigator.clipboard.writeText(logs).catch(error => {
+      this.logger.error('Failed to copy logs:', error);
+    });
   }
 
   // ===== Settings Import/Export =====
@@ -890,7 +928,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   async clearSyncState(): Promise<void> {
     if (this.backend instanceof ApiBackend) {
-      const stateManager = (this.backend as ApiBackend).getStateManager();
+      const stateManager = this.backend.getStateManager();
       stateManager.clear();
       await stateManager.save();
       this.showNotice(t('notice.syncStateCleared'));
@@ -907,7 +945,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     try {
       // Get list of tracked files
-      const gitBackend = this.backend as GitBackend;
+      const gitBackend = this.backend;
       const trackedFiles = await this.getTrackedFiles(gitBackend);
 
       // Filter out ignored files
@@ -950,10 +988,8 @@ export default class HybridGitSyncPlugin extends Plugin {
     }
   }
 
-  private async execGitCommand(gitBackend: GitBackend, command: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      gitBackend.exec(command).then(resolve).catch(reject);
-    });
+  private execGitCommand(gitBackend: GitBackend, command: string): Promise<string> {
+    return gitBackend.exec(command);
   }
 
   // ===== Version Restore =====
@@ -970,16 +1006,18 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
-    const remoteFile = await (this.backend as ApiBackend).getFile(activeFile.path);
+    const remoteFile = await this.backend.getFile(activeFile.path);
     if (!remoteFile) {
       this.showNotice(t('notice.fileNotFound'));
       return;
     }
 
     if (isBinaryFile(activeFile.path)) {
-      await this.app.vault.adapter.writeBinary(activeFile.path, remoteFile.content as ArrayBuffer);
-    } else {
-      await this.app.vault.adapter.write(activeFile.path, remoteFile.content as string);
+      if (remoteFile.content instanceof ArrayBuffer) {
+        await this.app.vault.adapter.writeBinary(activeFile.path, remoteFile.content);
+      }
+    } else if (typeof remoteFile.content === 'string') {
+      await this.app.vault.adapter.write(activeFile.path, remoteFile.content);
     }
     this.showNotice(t('notice.fileRestored', { path: activeFile.path }));
   }
@@ -992,14 +1030,14 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
-    const branches = await (this.backend as ApiBackend).getBranches();
+    const branches = await this.backend.getBranches();
     if (branches.length === 0) {
       this.showNotice('No branches found');
       return;
     }
 
     // Show branch selection
-    const currentBranch = (this.backend as ApiBackend).getBranch();
+    const currentBranch = this.backend.getBranch();
     new Notice(`Branches:\n${branches.map(b =>
       `${b === currentBranch ? '● ' : '  '}${b}`
     ).join('\n')}\n\nCurrent: ${currentBranch}`, 10000);
@@ -1018,17 +1056,31 @@ export default class HybridGitSyncPlugin extends Plugin {
 
     await leaf.setViewState({ type: HISTORY_VIEW_TYPE });
     const view = leaf.view as HistoryView;
+    const apiBackend = this.backend;
 
     // Load commit history
-    const commits = await (this.backend as ApiBackend).getCommitHistory();
+    const commits = (await apiBackend.getCommitHistory()).map(toHistoryCommit);
     view.setCommits(commits);
 
-    view.onCommitSelected(async (commit) => {
-      const details = await (this.backend as ApiBackend).getCommitDetails(commit.sha);
-      if (details) {
-        view.setCommits([details, ...commits.filter(c => c.sha !== commit.sha)]);
-      }
+    view.onCommitSelected((commit) => {
+      void this.loadCommitDetails(view, commits, apiBackend, commit);
     });
+  }
+
+  private async loadCommitDetails(
+    view: HistoryView,
+    commits: HistoryCommit[],
+    apiBackend: ApiBackend,
+    commit: HistoryCommit
+  ): Promise<void> {
+    try {
+      const details = await apiBackend.getCommitDetails(commit.sha);
+      if (details) {
+        view.setCommits([toHistoryCommit(details), ...commits.filter(c => c.sha !== commit.sha)]);
+      }
+    } catch (error) {
+      this.logger.error('Failed to load commit details:', error);
+    }
   }
 
   private async showChangesView(): Promise<void> {
@@ -1043,7 +1095,7 @@ export default class HybridGitSyncPlugin extends Plugin {
     view.setChanges(status.changedFiles);
 
     view.onFileClicked((path) => {
-      this.diffFile(path);
+      void this.diffFile(path);
     });
   }
 
@@ -1081,8 +1133,8 @@ export default class HybridGitSyncPlugin extends Plugin {
     } catch { /* file may not exist locally */ }
 
     // Get remote content
-    const remoteFile = await (this.backend as ApiBackend).getFile(path);
-    const remoteContent = remoteFile?.content as string || '';
+    const remoteFile = await this.backend.getFile(path);
+    const remoteContent = typeof remoteFile?.content === 'string' ? remoteFile.content : '';
 
     view.setDiff(path, remoteContent, localContent);
   }

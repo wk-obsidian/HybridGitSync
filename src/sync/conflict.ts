@@ -1,13 +1,28 @@
 import { Vault } from 'obsidian';
 import { ApiBackend } from '../backend/api-backend';
 import { SyncStateManager } from './state';
-import { Logger, LogLevel } from '../utils/logger';
+import { Logger } from '../utils/logger';
 import { computeDiff, mergeWithoutMarkers } from '../utils/diff';
-import type { DiffResult } from '../utils/diff';
 import { isBinaryFile } from '../utils/binary';
 
 export type ConflictResolution = 'local' | 'remote' | 'both' | 'merge' | 'skip';
 // 'merge' = auto-merge with conflict markers and save to file
+
+/** View-model for a single rendered diff row in the conflict modal */
+export interface ConflictDiffChange {
+  type: 'added' | 'removed' | 'modified' | 'unchanged';
+  line: string;
+  lineNum: number;
+  newLine?: string;
+}
+
+/** View-model for diff stats rendered by the conflict modal */
+export interface ConflictDiff {
+  changes: ConflictDiffChange[];
+  added: number;
+  removed: number;
+  modified: number;
+}
 
 export interface ConflictInfo {
   path: string;
@@ -269,7 +284,7 @@ export class ConflictResolver {
   /**
    * Generate diff between two texts using diff library
    */
-  generateDiff(local: string, remote: string): DiffResult {
+  generateDiff(local: string, remote: string): ConflictDiff {
     const result = computeDiff(local, remote);
     return {
       changes: result.lines.map(line => ({

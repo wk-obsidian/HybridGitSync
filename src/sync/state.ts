@@ -57,9 +57,16 @@ export class SyncStateManager {
   async load(): Promise<void> {
     try {
       const content = await this.vault.adapter.read(this.stateFile);
-      this.state = JSON.parse(content);
+      const parsed = JSON.parse(content) as Partial<SyncState>;
+      this.state = {
+        lastSyncTime: typeof parsed.lastSyncTime === 'string' ? parsed.lastSyncTime : '',
+        files: parsed.files ?? {},
+        remoteShas: parsed.remoteShas ?? {},
+        ...(typeof parsed.lastSyncHeadSha === 'string' ? { lastSyncHeadSha: parsed.lastSyncHeadSha } : {}),
+        ...(typeof parsed.repoId === 'string' ? { repoId: parsed.repoId } : {}),
+      };
     } catch {
-      // No state file yet, start fresh
+      // No state file yet or corrupted - start fresh
       this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
     }
   }

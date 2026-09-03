@@ -5,18 +5,25 @@ import { t } from '../i18n';
  */
 export class GitignoreRules {
   private patterns: GitignorePattern[] = [];
-  private builtInPatterns: string[] = [
-    '.obsidian/',
-    '.trash/',
-    '.git/',
-    '.DS_Store',
-    'Thumbs.db',
-    '*.tmp',
-    '*.bak',
-  ];
+  private builtInPatterns: string[];
+  private configDir: string;
 
-  constructor() {
+  /**
+   * @param configDir Obsidian's config folder name (vault.configDir),
+   *   not hardcoded to ".obsidian" since users can customize it.
+   */
+  constructor(configDir: string = '.obsidian') {
+    this.configDir = configDir;
     // Built-in patterns are only used as fallback when no .gitignore exists
+    this.builtInPatterns = [
+      `${configDir}/`,
+      '.trash/',
+      '.git/',
+      '.DS_Store',
+      'Thumbs.db',
+      '*.tmp',
+      '*.bak',
+    ];
   }
 
   /**
@@ -43,22 +50,23 @@ export class GitignoreRules {
    * Get default .gitignore content with localized comments
    */
   getDefaultContent(): string {
+    const dir = this.configDir;
     return `# ${t('gitignore.ignoreDotfiles')}
 .*
 
 # ${t('gitignore.keepDotfiles')}
-!.obsidian/
+!${dir}/
 !.gitignore
 
 # ${t('gitignore.obsidianDeviceFiles')}
-.obsidian/workspace.json
-.obsidian/workspace-mobile.json
+${dir}/workspace.json
+${dir}/workspace-mobile.json
 
 # ${t('gitignore.pluginsDirectory')}
-.obsidian/plugins/
+${dir}/plugins/
 
 # ${t('gitignore.cache')}
-.obsidian/cache/
+${dir}/cache/
 
 # ${t('gitignore.trash')}
 .trash/

@@ -58,12 +58,7 @@ export class ConfirmModal extends Modal {
       contentEl.createEl('p', { text: line });
     }
 
-    const buttonEl = contentEl.createDiv('modal-button-container');
-    buttonEl.style.display = 'flex';
-    buttonEl.style.flexDirection = 'column';
-    buttonEl.style.alignItems = 'stretch';
-    buttonEl.style.gap = '8px';
-    buttonEl.style.marginTop = '16px';
+    const buttonEl = contentEl.createDiv('hgs-confirm-actions');
 
     for (const action of this.actions) {
       const btn = buttonEl.createEl('button', { text: action.text });
@@ -73,7 +68,7 @@ export class ConfirmModal extends Modal {
         this.close();
       };
       if (action.hint) {
-        buttonEl.createEl('div', {
+        buttonEl.createDiv({
           text: action.hint,
           cls: 'setting-item-description',
         });
@@ -160,7 +155,7 @@ export class SettingsTab extends PluginSettingTab {
 
     // Platform info
     const infoEl = containerEl.createDiv('settings-platform-info');
-    infoEl.createEl('span', {
+    infoEl.createSpan({
       text: t('settings.platformInfo', {
         platform: this.plugin.getPlatformName(),
         backend: this.plugin.getActiveBackendName()
@@ -470,7 +465,7 @@ export class SettingsTab extends PluginSettingTab {
       .setDesc(t('settings.clearSyncStateDesc'))
       .addButton(cb => cb
         .setButtonText(t('settings.clearSyncStateButton'))
-        .setWarning()
+        .setDestructive()
         .onClick(() => {
           const modal = new ConfirmModal(
             this.app,
@@ -499,7 +494,7 @@ export class SettingsTab extends PluginSettingTab {
       .setDesc(t('settings.gitignoreRulesDesc'));
 
     // Create container for textarea and buttons
-    const containerEl = el.createEl('div', { cls: 'settings-gitignore-container' });
+    const containerEl = el.createDiv({ cls: 'settings-gitignore-container' });
 
     // Create textarea for .gitignore content
     const textareaEl = containerEl.createEl('textarea', { cls: 'settings-gitignore-textarea' });
@@ -508,7 +503,7 @@ export class SettingsTab extends PluginSettingTab {
     void this.loadGitignoreContent(textareaEl);
 
     // Buttons container
-    const buttonEl = containerEl.createEl('div', { cls: 'settings-gitignore-buttons' });
+    const buttonEl = containerEl.createDiv({ cls: 'settings-gitignore-buttons' });
 
     // Save button
     const saveBtn = buttonEl.createEl('button');
@@ -539,7 +534,7 @@ export class SettingsTab extends PluginSettingTab {
     try {
       await this.plugin.app.vault.adapter.write('.gitignore', content);
       // Reload gitignore rules
-      this.plugin.gitignore = new GitignoreRules();
+      this.plugin.gitignore = new GitignoreRules(this.plugin.app.vault.configDir);
       this.plugin.gitignore.addRules(content);
       new Notice(t('notice.gitignoreSaved'));
     } catch (error) {

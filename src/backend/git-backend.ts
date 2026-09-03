@@ -1,5 +1,4 @@
-import { exec } from 'child_process';
-import { Vault } from 'obsidian';
+import { FileSystemAdapter, Vault } from 'obsidian';
 import { SyncBackend, SyncResult, SyncStatus, FileChange } from './base';
 import { t } from '../i18n';
 import { getErrorMessage, toError } from '../utils/error';
@@ -13,8 +12,8 @@ export class GitBackend extends SyncBackend {
 
   constructor(vault: Vault, gitPath: string = 'git', remoteUrl: string = '', token: string = '') {
     super();
-    // @ts-ignore - basePath is available on vault adapter
-    this.vaultPath = vault.adapter.basePath || '';
+    // The vault's absolute path lives on the desktop-only FileSystemAdapter
+    this.vaultPath = vault.adapter instanceof FileSystemAdapter ? vault.adapter.getBasePath() : '';
     this.gitPath = gitPath;
     this.remoteUrl = remoteUrl;
     this.token = token;
@@ -270,10 +269,13 @@ export class GitBackend extends SyncBackend {
     // Nothing to dispose for native git
   }
 
-  exec(args: string): Promise<string> {
+  async exec(args: string): Promise<string> {
+    // child_process is a desktop-only Node API; import it lazily so the
+    // mobile bundle never loads it (this backend only runs on desktop)
+    const { exec } = await import('child_process');
     return new Promise((resolve, reject) => {
       // Build environment with token for authentication
-      const env: Record<string, string | undefined> = { ...process.env };
+      const env = { ...process.env };
       if (this.token) {
         // Use GIT_ASKPASS to provide credentials non-interactively
         // This tells git to use our token when it asks for credentials
@@ -286,7 +288,7 @@ export class GitBackend extends SyncBackend {
 
       exec(`${this.gitPath} ${args}`, {
         cwd: this.vaultPath,
-        env
+        env,
       }, (error, stdout, stderr) => {
         if (error) {
           reject(new Error(`${error.message}\n${stderr}`));

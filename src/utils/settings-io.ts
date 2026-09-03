@@ -75,7 +75,7 @@ export class SettingsIO {
    */
   importFromString(jsonString: string): PluginSettings | null {
     try {
-      const data = JSON.parse(jsonString);
+      const data = JSON.parse(jsonString) as { version?: unknown; settings?: PluginSettings };
 
       if (!data.version || !data.settings) {
         throw new Error('Invalid settings format');

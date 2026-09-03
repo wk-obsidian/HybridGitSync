@@ -27,7 +27,7 @@ export class I18n {
   private detectLocale(): Locale {
     // Use Obsidian's getLanguage() API
     const obsidianLang = getLanguage();
-    console.log('[HybridGitSync] Obsidian language:', obsidianLang);
+    console.debug('[HybridGitSync] Obsidian language:', obsidianLang);
 
     if (obsidianLang) {
       if (obsidianLang.startsWith('zh')) return 'zh';
@@ -36,7 +36,7 @@ export class I18n {
 
     // Fallback to system locale
     const systemLocale = navigator.language;
-    console.log('[HybridGitSync] System locale (fallback):', systemLocale);
+    console.debug('[HybridGitSync] System locale (fallback):', systemLocale);
     if (systemLocale.startsWith('zh')) return 'zh';
 
     return 'en';

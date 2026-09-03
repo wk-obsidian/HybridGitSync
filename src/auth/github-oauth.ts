@@ -11,7 +11,7 @@ const DEBUG = false;
 
 function log(...args: unknown[]): void {
   if (DEBUG) {
-    console.log('[OAuth]', ...args);
+    console.debug('[OAuth]', ...args);
   }
 }
 

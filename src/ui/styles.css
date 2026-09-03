@@ -454,3 +454,16 @@
   background-color: var(--text-error);
   color: var(--text-on-accent);
 }
+
+/* Confirm modal action buttons stacked vertically (clear sync state, remote reset) */
+.hgs-confirm-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.hgs-confirm-actions .setting-item-description {
+  padding: 0;
+}

@@ -25,7 +25,7 @@ export class SyncQueue {
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
       this.queue.push(operation);
-      this.processQueue();
+      void this.processQueue();
     }, this.debounceMs);
   }
 
@@ -34,7 +34,7 @@ export class SyncQueue {
    */
   enqueueImmediate(operation: () => Promise<void>): void {
     this.queue.push(operation);
-    this.processQueue();
+    void this.processQueue();
   }
 
   /**

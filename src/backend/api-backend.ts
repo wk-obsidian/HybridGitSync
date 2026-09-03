@@ -104,7 +104,7 @@ export class ApiBackend extends SyncBackend {
       }
     }
     this.stateManager = new SyncStateManager(vault);
-    this.gitignore = gitignore || new GitignoreRules();
+    this.gitignore = gitignore || new GitignoreRules(vault.configDir);
     this.debug = debug;
     this.logger = new Logger('ApiBackend', debug ? LogLevel.DEBUG : LogLevel.INFO);
     this.tempFileManager = new TempFileManager(vault, debug);
@@ -178,11 +178,11 @@ export class ApiBackend extends SyncBackend {
    */
   async initializeRepo(): Promise<SyncResult> {
     try {
-      console.log('[HybridGitSync] Initializing empty repository...');
+      this.log('Initializing empty repository...');
 
       // Get .gitignore content
       const gitignoreContent = this.gitignore.getDefaultContent();
-      const base64Content = btoa(unescape(encodeURIComponent(gitignoreContent)));
+      const base64Content = this.encodeBase64Text(gitignoreContent);
 
       if (this.config.provider === 'gitlab') {
         // GitLab: use Commits API (creates branch automatically)
@@ -192,7 +192,7 @@ export class ApiBackend extends SyncBackend {
         await this.initializeGithubGiteaRepo(base64Content);
       }
 
-      console.log('[HybridGitSync] Repository initialized successfully');
+      this.log('Repository initialized successfully');
       return {
         success: true,
         message: t('repo.initialized'),
@@ -214,23 +214,23 @@ export class ApiBackend extends SyncBackend {
    */
   private async initializeGithubGiteaRepo(base64Content: string): Promise<void> {
     // Use Contents API to create .gitignore - this auto-creates the default branch
-    console.log('[HybridGitSync] Creating .gitignore via Contents API...');
+    this.log('Creating .gitignore via Contents API...');
     try {
       // Don't specify branch - let GitHub/Gitea create the default branch automatically
-      const data = await this.apiRequest('PUT',
+      const data = await this.apiRequest<{ content: { sha: string } }>('PUT',
         `/repos/${this.config.repo}/contents/.gitignore`,
         {
           message: 'Initial commit',
           content: base64Content,
         }
-      ) as { content: { sha: string } };
-      console.log('[HybridGitSync] Created .gitignore, sha:', data.content.sha);
+      );
+      this.log('Created .gitignore, sha:', data.content.sha);
 
       // Now detect the actual default branch
-      const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
+      const repoInfo = await this.apiRequest<RepoInfo>('GET', `/repos/${this.config.repo}`);
       if (repoInfo.default_branch) {
         this.config.branch = repoInfo.default_branch;
-        console.log('[HybridGitSync] Detected default branch:', this.config.branch);
+        this.log('Detected default branch:', this.config.branch);
       }
     } catch (error) {
       console.error('[HybridGitSync] Error in initializeGithubGiteaRepo:', error);
@@ -897,15 +897,11 @@ export class ApiBackend extends SyncBackend {
       });
 
       // Step 9: Pull new/modified remote files
-      // Separate large files from small files for better handling
       const smallFiles: string[] = [];
-      const largeFiles: string[] = [];
-      const LARGE_FILE_THRESHOLD = 1024 * 1024; // 1MB
 
       for (const path of actions.pullFromRemote) {
         if (this.shouldIgnore(path)) continue;
-        const remoteSha = remoteMap.get(path);
-        // We'll determine size during download, so check all files
+        // Size is determined during download, so all files go through the same path
         smallFiles.push(path);
       }
 
@@ -982,7 +978,7 @@ export class ApiBackend extends SyncBackend {
 
               if (isBinary) {
                 const content = await this.vault.adapter.readBinary(path);
-                size = (content as ArrayBuffer).byteLength;
+                size = content.byteLength;
               } else {
                 const content = await this.vault.adapter.read(path);
                 size = new TextEncoder().encode(content).length;
@@ -1636,7 +1632,7 @@ export class ApiBackend extends SyncBackend {
       this.log('batchCommitWithGitDataApi: created', blobResults.length, 'blobs');
 
       // Step 3: Build tree entries
-      const treeEntries: TreeEntry[] = blobResults.map((blob) => ({
+      const treeEntries = blobResults.map((blob) => ({
         path: blob.path,
         mode: '100644' as const,
         type: 'blob' as const,
@@ -1744,7 +1740,7 @@ export class ApiBackend extends SyncBackend {
           file_path: file.path,
           content: file.isBinary
             ? this.encodeBase64Binary(file.content as ArrayBuffer)
-            : file.content as string,
+            : file.content,
           encoding: file.isBinary ? 'base64' : 'text',
         });
       }
@@ -1798,8 +1794,8 @@ export class ApiBackend extends SyncBackend {
             action: sha ? 'update' : 'create',
             file_path: path,
             content: isBinary
-              ? this.encodeBase64Binary(content as ArrayBuffer)
-              : content as string,
+              ? this.encodeBase64Binary(content)
+              : content,
             encoding: isBinary ? 'base64' : 'text',
           }],
         }
@@ -1807,8 +1803,8 @@ export class ApiBackend extends SyncBackend {
       // GitLab doesn't return the new blob SHA - compute it locally so it stays
       // consistent with Tree API blob ids used for change detection
       return isBinary
-        ? await this.gitBlobSha1Binary(content as ArrayBuffer)
-        : await this.gitBlobSha1(content as string);
+        ? await this.gitBlobSha1Binary(content)
+        : await this.gitBlobSha1(content);
     }
 
     const base64Content = isBinary
@@ -2444,12 +2440,12 @@ export class ApiBackend extends SyncBackend {
     }
   }
 
-  private async apiRequest(
+  private async apiRequest<T = unknown>(
     method: string,
     path: string,
     body?: Record<string, unknown>,
     options?: { raw?: boolean }
-  ): Promise<unknown> {
+  ): Promise<T> {
     const [pathPart, queryPart] = path.split('?');
     // Segments already containing '%' are pre-encoded (e.g. GitLab project ids
     // like "ns%2Fproject" and file paths with Chinese characters) - pass them
@@ -2461,7 +2457,7 @@ export class ApiBackend extends SyncBackend {
       ? `${this.baseUrl}${encodedPath}?${queryPart}`
       : `${this.baseUrl}${encodedPath}`;
 
-    console.log('[HybridGitSync] apiRequest:', method, url);
+    this.log('apiRequest:', method, url);
 
     const headers: Record<string, string> = {
       'Authorization': `token ${this.config.token}`,
@@ -2482,7 +2478,7 @@ export class ApiBackend extends SyncBackend {
         throw: false,
       });
 
-      console.log('[HybridGitSync] apiRequest response status:', response.status);
+      this.log('apiRequest response status:', response.status);
 
       if (response.status >= 400) {
         const errorText = response.text || '';
@@ -2491,9 +2487,9 @@ export class ApiBackend extends SyncBackend {
       }
 
       if (options?.raw) {
-        return response.arrayBuffer;
+        return response.arrayBuffer as T;
       }
-      return response.json;
+      return response.json as T;
     } catch (error) {
       console.error('[HybridGitSync] apiRequest exception:', error);
       throw error;

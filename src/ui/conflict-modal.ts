@@ -1,6 +1,6 @@
 import { App, Modal } from 'obsidian';
 import { ConflictInfo, ConflictResolution } from '../sync/conflict';
-import type { DiffResult } from '../utils/diff';
+import type { ConflictDiff } from '../sync/conflict';
 import { t } from '../i18n';
 import { getErrorMessage } from '../utils/error';
 
@@ -9,13 +9,13 @@ import { getErrorMessage } from '../utils/error';
  */
 export class ConflictModal extends Modal {
   private conflict: ConflictInfo;
-  private diff: DiffResult;
+  private diff: ConflictDiff;
   private onResolve: (resolution: ConflictResolution) => Promise<void>;
 
   constructor(
     app: App,
     conflict: ConflictInfo,
-    diff: DiffResult,
+    diff: ConflictDiff,
     onResolve: (resolution: ConflictResolution) => Promise<void>
   ) {
     super(app);
@@ -72,22 +72,26 @@ export class ConflictModal extends Modal {
   private createActionButton(parent: HTMLElement, text: string, resolution: ConflictResolution, cls: string): void {
     const btn = parent.createEl('button', { text, cls: `conflict-btn ${cls}` });
 
-    btn.addEventListener('click', async () => {
-      btn.disabled = true;
-      btn.setText(t('ui.processing'));
-      try {
-        await this.onResolve(resolution);
-        this.close();
-      } catch (error) {
-        console.error('[ConflictModal] Resolution failed:', error);
-        btn.disabled = false;
-        btn.setText(text);
-        // Show error message
-        const errorEl = this.contentEl.createDiv('conflict-error');
-        errorEl.setText(`Error: ${getErrorMessage(error)}`);
-        window.setTimeout(() => errorEl.remove(), 5000);
-      }
+    btn.addEventListener('click', () => {
+      void this.resolveAction(btn, text, resolution);
     });
+  }
+
+  private async resolveAction(btn: HTMLButtonElement, text: string, resolution: ConflictResolution): Promise<void> {
+    btn.disabled = true;
+    btn.setText(t('ui.processing'));
+    try {
+      await this.onResolve(resolution);
+      this.close();
+    } catch (error) {
+      console.error('[ConflictModal] Resolution failed:', error);
+      btn.disabled = false;
+      btn.setText(text);
+      // Show error message
+      const errorEl = this.contentEl.createDiv('conflict-error');
+      errorEl.setText(`Error: ${getErrorMessage(error)}`);
+      window.setTimeout(() => errorEl.remove(), 5000);
+    }
   }
 
   onClose(): void {
