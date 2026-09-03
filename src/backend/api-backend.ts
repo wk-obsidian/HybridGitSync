@@ -444,6 +444,9 @@ export class ApiBackend extends SyncBackend {
 
   async push(): Promise<SyncResult> {
     try {
+      // Load sync state so the remote SHA cache stays consistent after push
+      await this.stateManager.load();
+
       // Get remote file list with SHAs
       const remoteFiles = await this.listFilesRecursive('');
       const remoteMap = new Map<string, string>(); // path -> sha
@@ -489,7 +492,9 @@ export class ApiBackend extends SyncBackend {
           }
 
           this.log('Uploading:', localPath);
-          await this.putFile(localPath, localContent, remoteSha);
+          const newSha = await this.putFile(localPath, localContent, remoteSha);
+          this.stateManager.setFileState(localPath, newSha);
+          this.stateManager.setRemoteSha(localPath, newSha);
           pushed++;
           remoteMap.delete(localPath); // Mark as processed
         } catch (e) {
@@ -504,11 +509,15 @@ export class ApiBackend extends SyncBackend {
         if (this.shouldIgnore(path)) continue;
         try {
           await this.deleteFile(path, sha);
+          this.stateManager.removeFileState(path);
+          this.stateManager.removeRemoteSha(path);
           pushed++;
         } catch (e) {
           errors.push(`delete ${path}: ${(e as Error).message}`);
         }
       }
+
+      await this.stateManager.save();
 
       if (errors.length > 0) {
         return {
@@ -880,6 +889,11 @@ export class ApiBackend extends SyncBackend {
       const filesToPush = actions.pushToRemote.filter(path => !this.shouldIgnore(path));
       const filesToDelete = actions.deleteFromRemote.filter(path => !this.shouldIgnore(path));
 
+      // Track paths pushed/deleted during this sync so the remote SHA
+      // cache (Step 13) is not overwritten with the pre-sync snapshot
+      const pushedThisSync = new Set<string>();
+      const deletedThisSync = new Set<string>();
+
       if (filesToPush.length > 0 || filesToDelete.length > 0) {
         try {
           // Get current commit SHA - only GitHub's deletion flow needs it
@@ -994,11 +1008,18 @@ export class ApiBackend extends SyncBackend {
               if (result.success) {
                 for (const file of filesWithContent) {
                   this.stateManager.setFileState(file.path, file.contentHash);
+                  // The pushed blob sha equals the content hash (git blob
+                  // SHA) on all providers - cache it now so the next sync
+                  // doesn't see a stale "remote changed"
+                  this.stateManager.setRemoteSha(file.path, file.contentHash);
+                  pushedThisSync.add(file.path);
                   pushed++;
                 }
                 if (isLastBatch) {
                   for (const path of filesToDelete) {
                     this.stateManager.removeFileState(path);
+                    this.stateManager.removeRemoteSha(path);
+                    deletedThisSync.add(path);
                     deleted++;
                   }
                 }
@@ -1050,6 +1071,8 @@ export class ApiBackend extends SyncBackend {
               if (result.success) {
                 for (const file of filesWithContent) {
                   this.stateManager.setFileState(file.path, file.contentHash);
+                  this.stateManager.setRemoteSha(file.path, file.contentHash);
+                  pushedThisSync.add(file.path);
                   pushed++;
                 }
                 this.log(`Batch ${batchIndex + 1} complete (Git Data API): ${filesWithContent.length} files pushed`);
@@ -1084,6 +1107,8 @@ export class ApiBackend extends SyncBackend {
 
                 for (const path of filesToDelete) {
                   this.stateManager.removeFileState(path);
+                  this.stateManager.removeRemoteSha(path);
+                  deletedThisSync.add(path);
                   deleted++;
                 }
 
@@ -1135,6 +1160,8 @@ export class ApiBackend extends SyncBackend {
               if (result.success) {
                 for (const file of filesWithContent) {
                   this.stateManager.setFileState(file.path, file.contentHash);
+                  this.stateManager.setRemoteSha(file.path, file.contentHash);
+                  pushedThisSync.add(file.path);
                   pushed++;
                 }
                 this.log(`Batch ${batchIndex + 1} complete (Contents API): ${filesWithContent.length} files pushed`);
@@ -1154,6 +1181,8 @@ export class ApiBackend extends SyncBackend {
                   );
                   await this.deleteFile(path, fileData.sha);
                   this.stateManager.removeFileState(path);
+                  this.stateManager.removeRemoteSha(path);
+                  deletedThisSync.add(path);
                   deleted++;
                 } catch (e) {
                   errors.push(`delete ${path}: ${(e as Error).message}`);
@@ -1185,9 +1214,20 @@ export class ApiBackend extends SyncBackend {
       }
 
       // Step 13: Cache remote SHAs for next sync
+      // remoteMap is a pre-sync snapshot, so override files pushed during
+      // this sync with their new blob SHAs (equal to the content hash) and
+      // drop files deleted during this sync - otherwise the next sync would
+      // see a stale "remote changed" and could report false conflicts
       const remoteShas: Record<string, string> = {};
       for (const [path, sha] of remoteMap) {
         remoteShas[path] = sha;
+      }
+      for (const path of pushedThisSync) {
+        const sha = this.stateManager.getFileState(path);
+        if (sha) remoteShas[path] = sha;
+      }
+      for (const path of deletedThisSync) {
+        delete remoteShas[path];
       }
       this.stateManager.setAllRemoteShas(remoteShas);
       this.stateManager.setLastSyncHeadSha(currentHeadSha);
@@ -1400,8 +1440,6 @@ export class ApiBackend extends SyncBackend {
               this.log(`Download timeout after ${timeoutMs}ms for: ${path}`);
               reject(new Error(`Download timeout after ${timeoutMs / 1000} seconds`));
             }, timeoutMs);
-            // Prevent timer from keeping process alive
-            if (timer.unref) timer.unref();
           });
 
           const response = await Promise.race([downloadPromise, timeoutPromise]);
