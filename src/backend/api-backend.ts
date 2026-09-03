@@ -1498,7 +1498,7 @@ export class ApiBackend extends SyncBackend {
           // 2 minute timeout for large files (Obsidian may have shorter internal timeout)
           const timeoutMs = 2 * 60 * 1000;
           const timeoutPromise = new Promise<never>((_, reject) => {
-            const timer = window.setTimeout(() => {
+            window.setTimeout(() => {
               this.log(`Download timeout after ${timeoutMs}ms for: ${path}`);
               reject(new Error(`Download timeout after ${timeoutMs / 1000} seconds`));
             }, timeoutMs);
@@ -2338,25 +2338,6 @@ export class ApiBackend extends SyncBackend {
   }
 
   // ===== Private helpers =====
-
-  /**
-   * Check if file is too large for API
-   * GitHub API limit is around 50MB for content API
-   */
-  private isFileTooLarge(content: string): boolean {
-    const sizeInBytes = new TextEncoder().encode(content).length;
-    const maxSize = 50 * 1024 * 1024; // 50MB (GitHub API actual limit)
-    return sizeInBytes > maxSize;
-  }
-
-  /**
-   * Get file size in human readable format
-   */
-  private formatFileSize(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
 
   /**
    * Generate Git-compatible blob SHA-1 for text content

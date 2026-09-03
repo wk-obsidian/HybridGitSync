@@ -14,8 +14,6 @@ interface DiffLine {
  */
 export class DiffView extends ItemView {
   private filePath: string = '';
-  private oldContent: string = '';
-  private newContent: string = '';
   private diffLines: DiffLine[] = [];
 
   constructor(leaf: WorkspaceLeaf) {
@@ -47,8 +45,6 @@ export class DiffView extends ItemView {
    */
   setDiff(filePath: string, oldContent: string, newContent: string): void {
     this.filePath = filePath;
-    this.oldContent = oldContent;
-    this.newContent = newContent;
     this.diffLines = this.computeDiff(oldContent, newContent);
     this.render();
   }

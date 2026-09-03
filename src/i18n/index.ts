@@ -1,6 +1,6 @@
 import en from './locales/en';
 import zh from './locales/zh';
-import { App, getLanguage } from 'obsidian';
+import { getLanguage } from 'obsidian';
 
 export type Locale = 'en' | 'zh';
 

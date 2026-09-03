@@ -578,22 +578,6 @@ export class SettingsTab extends PluginSettingTab {
     }
   }
 
-  private async loadRepos(dropdown: { addOption: (value: string, label: string) => void; setValue: (value: string) => void }): Promise<void> {
-    try {
-      const repos = await listRepos(this.plugin.settings.apiToken);
-      for (const repo of repos) {
-        const label = repo.private ? `🔒 ${repo.fullName}` : repo.fullName;
-        dropdown.addOption(repo.fullName, label);
-      }
-      // Set current value if exists
-      if (this.plugin.settings.remoteUrl) {
-        dropdown.setValue(this.plugin.settings.remoteUrl);
-      }
-    } catch (error) {
-      console.error('[HybridGitSync] Failed to load repos:', error);
-    }
-  }
-
   private async loadReposToElement(selectEl: HTMLSelectElement): Promise<void> {
     try {
       const repos = await listRepos(this.plugin.settings.apiToken);
