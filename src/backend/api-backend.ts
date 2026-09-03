@@ -2488,8 +2488,8 @@ export class ApiBackend extends SyncBackend {
 
       if (response.status >= 400) {
         const errorText = response.text || '';
-        // 404s that callers expect (e.g. branch ref checks) are not errors
-        const isExpected = response.status === 404 && !!options?.silentNotFound;
+        // 404/409 that callers expect (e.g. branch ref checks, empty repos) are not errors
+        const isExpected = !!options?.silentNotFound && (response.status === 404 || response.status === 409);
         if (!isExpected) {
           console.error('[HybridGitSync] apiRequest error:', response.status, errorText);
         }
@@ -2501,7 +2501,7 @@ export class ApiBackend extends SyncBackend {
       }
       return response.json as T;
     } catch (error) {
-      if (!(options?.silentNotFound && error instanceof Error && error.message.startsWith('API error 404'))) {
+      if (!(options?.silentNotFound && error instanceof Error && (error.message.startsWith('API error 404') || error.message.startsWith('API error 409')))) {
         console.error('[HybridGitSync] apiRequest exception:', error);
       }
       throw error;
