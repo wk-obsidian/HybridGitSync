@@ -270,7 +270,7 @@ export class GitBackend extends SyncBackend {
     // Nothing to dispose for native git
   }
 
-  private exec(args: string): Promise<string> {
+  exec(args: string): Promise<string> {
     return new Promise((resolve, reject) => {
       // Build environment with token for authentication
       const env: Record<string, string | undefined> = { ...process.env };

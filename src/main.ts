@@ -1,4 +1,4 @@
-import { EventRef, Notice, Plugin } from 'obsidian';
+import { EventRef, Notice, Plugin, TFile } from 'obsidian';
 import { PluginSettings, SettingsTab, DEFAULT_SETTINGS } from './settings';
 import { getErrorMessage } from './utils/error';
 import { SyncBackend } from './backend/base';
@@ -522,8 +522,8 @@ export default class HybridGitSyncPlugin extends Plugin {
           // The user has edited the file and clicked "Done"
           try {
             const file = this.app.vault.getAbstractFileByPath(conflict.path);
-            if (file) {
-              const content = await this.app.vault.read(file as any);
+            if (file instanceof TFile) {
+              const content = await this.app.vault.read(file);
               const contentHash = await apiBackend.gitBlobSha1(content);
               stateManager.setFileState(conflict.path, contentHash);
               await stateManager.save();
@@ -842,8 +842,7 @@ export default class HybridGitSyncPlugin extends Plugin {
 
   private async execGitCommand(gitBackend: GitBackend, command: string): Promise<string> {
     return new Promise((resolve, reject) => {
-      // Access the private exec method via any cast
-      (gitBackend as any).exec(command).then(resolve).catch(reject);
+      gitBackend.exec(command).then(resolve).catch(reject);
     });
   }
 

@@ -12,7 +12,7 @@ export class TempFileManager {
 
   constructor(vault: Vault, debug: boolean = false) {
     this.vault = vault;
-    this.tempDir = '.obsidian/plugins/hybrid-git-sync/.tmp';
+    this.tempDir = `${vault.configDir}/plugins/hybrid-git-sync/.tmp`;
     this.logger = new Logger('TempFile', debug ? LogLevel.DEBUG : LogLevel.INFO);
   }
 

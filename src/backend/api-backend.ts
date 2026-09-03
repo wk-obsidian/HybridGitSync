@@ -1396,7 +1396,7 @@ export class ApiBackend extends SyncBackend {
           // 2 minute timeout for large files (Obsidian may have shorter internal timeout)
           const timeoutMs = 2 * 60 * 1000;
           const timeoutPromise = new Promise<never>((_, reject) => {
-            const timer = setTimeout(() => {
+            const timer = window.setTimeout(() => {
               this.log(`Download timeout after ${timeoutMs}ms for: ${path}`);
               reject(new Error(`Download timeout after ${timeoutMs / 1000} seconds`));
             }, timeoutMs);
@@ -1732,7 +1732,7 @@ export class ApiBackend extends SyncBackend {
           // Wait before retry (exponential backoff: 1s, 2s, 4s)
           const delay = Math.pow(2, attempt) * 1000;
           this.log(`Conflict uploading ${path}, retrying in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
+          await new Promise(resolve => window.setTimeout(resolve, delay));
           continue;
         }
         throw error;
