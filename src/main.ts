@@ -1,4 +1,4 @@
-import { Notice, Plugin } from 'obsidian';
+import { EventRef, Notice, Plugin } from 'obsidian';
 import { PluginSettings, SettingsTab, DEFAULT_SETTINGS } from './settings';
 import { getErrorMessage } from './utils/error';
 import { SyncBackend } from './backend/base';
@@ -30,6 +30,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   logger!: Logger;
   settingsIO!: SettingsIO;
   private autoSyncInterval: number | null = null;
+  private fileChangeRefs: EventRef[] = [];
   private isResolvingConflicts = false;
   private pauseFileChangeSync = false;
 
@@ -91,8 +92,11 @@ export default class HybridGitSyncPlugin extends Plugin {
     // Listen for network status changes
     this.network.onChange(online => {
       if (online) {
-        this.log('Network restored, triggering sync');
-        void this.performSync();
+        // Only resume sync on network restore if an auto-sync mode is enabled
+        if (this.settings.autoSync || this.settings.syncOnFileChange) {
+          this.log('Network restored, triggering sync');
+          void this.performSync();
+        }
       } else {
         this.statusBar.setState('offline');
       }
@@ -123,6 +127,8 @@ export default class HybridGitSyncPlugin extends Plugin {
     await this.initBackend();
     // Update sync queue debounce
     this.syncQueue.setDebounceMs(this.settings.fileChangeDebounce * 1000);
+    // Re-apply auto sync config (interval and file-change listeners)
+    this.setupAutoSync();
   }
 
   // ===== Backend Management =====
@@ -553,34 +559,29 @@ export default class HybridGitSyncPlugin extends Plugin {
     }
 
     if (this.settings.syncOnFileChange) {
-      this.registerEvent(
+      // Keep refs so listeners can be removed when the setting changes
+      this.fileChangeRefs = [
         this.app.vault.on('modify', (file) => {
           if (!this.gitignore.shouldIgnore(file.path)) {
             this.onFileChange();
           }
-        })
-      );
-      this.registerEvent(
+        }),
         this.app.vault.on('create', (file) => {
           if (!this.gitignore.shouldIgnore(file.path)) {
             this.onFileChange();
           }
-        })
-      );
-      this.registerEvent(
+        }),
         this.app.vault.on('delete', (file) => {
           if (!this.gitignore.shouldIgnore(file.path)) {
             this.onFileChange();
           }
-        })
-      );
-      this.registerEvent(
+        }),
         this.app.vault.on('rename', (file) => {
           if (!this.gitignore.shouldIgnore(file.path)) {
             this.onFileChange();
           }
-        })
-      );
+        }),
+      ];
     }
   }
 
@@ -589,6 +590,11 @@ export default class HybridGitSyncPlugin extends Plugin {
       window.clearInterval(this.autoSyncInterval);
       this.autoSyncInterval = null;
     }
+    // Remove file-change listeners registered by a previous setup
+    for (const ref of this.fileChangeRefs) {
+      this.app.vault.offref(ref);
+    }
+    this.fileChangeRefs = [];
   }
 
   private onFileChange(): void {
