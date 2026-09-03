@@ -33,7 +33,12 @@ export class ConfirmModal extends Modal {
     this.actions = actions;
   }
 
-  open(): Promise<string | null> {
+  /**
+   * Open the modal and resolve with the chosen action (null when dismissed).
+   * Named differently from Modal#open (which returns void) to avoid overriding
+   * the base method's void contract.
+   */
+  openAndWait(): Promise<string | null> {
     if (this.resolveFn) return Promise.resolve(null); // already open
     return new Promise<string | null>((resolve) => {
       this.resolveFn = resolve;
@@ -463,10 +468,12 @@ export class SettingsTab extends PluginSettingTab {
     new Setting(el)
       .setName(t('settings.clearSyncState'))
       .setDesc(t('settings.clearSyncStateDesc'))
-      .addButton(cb => cb
-        .setButtonText(t('settings.clearSyncStateButton'))
-        .setDestructive()
-        .onClick(() => {
+      .addButton(cb => {
+        cb.setButtonText(t('settings.clearSyncStateButton'));
+        // Destructive styling via CSS class: setDestructive() requires a newer
+        // Obsidian than our declared minAppVersion
+        cb.buttonEl.addClass('mod-warning');
+        cb.onClick(() => {
           const modal = new ConfirmModal(
             this.app,
             t('settings.clearSyncStateConfirmTitle'),
@@ -477,12 +484,13 @@ export class SettingsTab extends PluginSettingTab {
               warning: true,
             }]
           );
-          void modal.open().then((action) => {
+          void modal.openAndWait().then((action) => {
             if (action === 'confirm') {
               void this.plugin.clearSyncState();
             }
           });
-        }));
+        });
+      });
   }
 
   private renderGitignoreSettings(el: HTMLElement): void {

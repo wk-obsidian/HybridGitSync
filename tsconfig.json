@@ -12,6 +12,7 @@
     "isolatedModules": true,
     "strictNullChecks": true,
     "skipLibCheck": true,
+    "types": [],
     "lib": [
       "DOM",
       "DOM.Iterable",

@@ -70,13 +70,16 @@ export class Logger {
     const levelStr = LogLevel[level].padEnd(5);
     const message = `[${this.prefix}] [${levelStr}] ${timestamp}`;
 
-    // Console output (info-level details are kept in memory only - they are
-    // available through the "View logs" command)
+    // Console output. Info-level operational details print only when debug
+    // mode is on (memory log always records them for the "View logs" command).
     switch (level) {
       case LogLevel.DEBUG:
         console.debug(message, ...args);
         break;
       case LogLevel.INFO:
+        if (this.level === LogLevel.DEBUG) {
+          console.debug(message, ...args);
+        }
         break;
       case LogLevel.WARN:
         console.warn(message, ...args);

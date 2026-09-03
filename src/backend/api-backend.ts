@@ -41,10 +41,6 @@ interface GitTreeResponse {
   tree: GitTreeItem[];
 }
 
-interface GitRef {
-  object: { sha: string };
-}
-
 interface CommitInfo {
   sha: string;
   message: string;
@@ -129,9 +125,9 @@ export class ApiBackend extends SyncBackend {
         // GitLab: project lookup by URL-encoded path (namespace%2Fproject)
         repoInfo = await this.apiRequest('GET',
           `/projects/${this.gitlabProjectId()}`
-        ) as RepoInfo;
+        );
       } else {
-        repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
+        repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`);
       }
       // Auto-detect default branch if not specified or invalid
       if (repoInfo.default_branch && this.config.branch !== repoInfo.default_branch) {
@@ -157,8 +153,20 @@ export class ApiBackend extends SyncBackend {
         );
         return Array.isArray(branches) && branches.length === 0;
       }
+      if (this.config.provider === 'gitea') {
+        // Gitea has no Git Data API - check the branches endpoint instead
+        // (a 404 here means an empty repo, handled by the catch below)
+        const branches = await this.apiRequest('GET',
+          `/repos/${this.config.repo}/branches`
+        );
+        return Array.isArray(branches) && branches.length === 0;
+      }
+      // GitHub: a missing branch ref (404) or an empty-repo error (409) both
+      // mean the repo has no commits yet
       await this.apiRequest('GET',
-        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`,
+        undefined,
+        { silentNotFound: true }
       );
       return false; // Branch exists, repo is not empty
     } catch (error) {
@@ -268,10 +276,10 @@ export class ApiBackend extends SyncBackend {
       ? this.encodeBase64Binary(content as ArrayBuffer)
       : this.encodeBase64Text(content as string);
 
-    const data = await this.apiRequest('POST',
+    const data = await this.apiRequest<{ sha: string }>('POST',
       `/repos/${this.config.repo}/git/blobs`,
       { content: base64Content, encoding: 'base64' }
-    ) as { sha: string };
+    );
 
     return data.sha;
   }
@@ -297,10 +305,10 @@ export class ApiBackend extends SyncBackend {
       body.base_tree = baseTree;
     }
 
-    const data = await this.apiRequest('POST',
+    const data = await this.apiRequest<{ sha: string }>('POST',
       `/repos/${this.config.repo}/git/trees`,
       body
-    ) as { sha: string };
+    );
 
     return data.sha;
   }
@@ -321,10 +329,10 @@ export class ApiBackend extends SyncBackend {
       body.parents = [parentSha];
     }
 
-    const data = await this.apiRequest('POST',
+    const data = await this.apiRequest<{ sha: string }>('POST',
       `/repos/${this.config.repo}/git/commits`,
       body
-    ) as { sha: string };
+    );
 
     return data.sha;
   }
@@ -963,7 +971,7 @@ export class ApiBackend extends SyncBackend {
             const refData = await this.apiRequest('GET',
               `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
             );
-            const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
+            const branchInfo = (Array.isArray(refData) ? refData[0] : refData);
             currentCommitSha = branchInfo?.object?.sha;
           }
 
@@ -1146,9 +1154,9 @@ export class ApiBackend extends SyncBackend {
             if (filesToDelete.length > 0) {
               this.log(`Processing ${filesToDelete.length} file deletions`);
               try {
-                const currentTree = await this.apiRequest('GET',
+                const currentTree = await this.apiRequest<GitTreeResponse>('GET',
                   `/repos/${this.config.repo}/git/trees/${currentCommitSha}`
-                ) as GitTreeResponse;
+                );
 
                 const deleteSet = new Set(filesToDelete);
                 const treeItems = [];
@@ -1569,10 +1577,10 @@ export class ApiBackend extends SyncBackend {
     // Estimated decoded length of the inline base64 content (complete = size)
     const decodedLength = data.content ? (data.content.length * 3) / 4 : 0;
     if (!data.content || (data.size !== undefined && data.size > decodedLength)) {
-      const raw = await this.apiRequest('GET',
+      const raw = await this.apiRequest<ArrayBuffer>('GET',
         `/projects/${projectId}/repository/files/${encodedPath}/raw?ref=${encodeURIComponent(this.config.branch)}`,
         undefined, { raw: true }
-      ) as ArrayBuffer;
+      );
       content = isBinary ? raw : new TextDecoder('utf-8').decode(raw);
     } else if (isBinary) {
       content = this.decodeBase64Binary(data.content);
@@ -1822,9 +1830,9 @@ export class ApiBackend extends SyncBackend {
     const maxRetries = 3;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const data = await this.apiRequest('PUT',
+        const data = await this.apiRequest<PutFileResponse>('PUT',
           `/repos/${this.config.repo}/contents/${path}`, body
-        ) as PutFileResponse;
+        );
         return data.content.sha;
       } catch (error) {
         const msg = (error as Error).message || '';
@@ -1871,7 +1879,7 @@ export class ApiBackend extends SyncBackend {
           (path ? `&path=${encodeURIComponent(path)}` : '');
         const data = await this.apiRequest('GET',
           `/projects/${this.gitlabProjectId()}/repository/tree?${query}`
-        ) as Array<Record<string, unknown>>;
+        );
         if (!Array.isArray(data)) return [];
         return data.map((item) => ({
           name: item.name as string,
@@ -1883,7 +1891,7 @@ export class ApiBackend extends SyncBackend {
       }
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${this.config.branch}`
-      ) as Array<Record<string, unknown>>;
+      );
       if (!Array.isArray(data)) return [];
       return data.map((item) => ({
         name: item.name as string,
@@ -1928,7 +1936,7 @@ export class ApiBackend extends SyncBackend {
       const refData = await this.apiRequest('GET',
         `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
       );
-      const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
+      const branchInfo = (Array.isArray(refData) ? refData[0] : refData);
 
       if (!branchInfo?.object?.sha) {
         throw new Error(`Branch not found: ${this.config.branch}`);
@@ -1937,9 +1945,9 @@ export class ApiBackend extends SyncBackend {
 
       // Gitea uses ?recursive=true, GitHub uses ?recursive=1
       const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
-      const tree = await this.apiRequest('GET',
+      const tree = await this.apiRequest<GitTreeResponse>('GET',
         `/repos/${this.config.repo}/git/trees/${headSha}?${recursiveParam}`
-      ) as GitTreeResponse;
+      );
 
       if (tree.tree) {
         for (const item of tree.tree) {
@@ -1974,9 +1982,9 @@ export class ApiBackend extends SyncBackend {
     // Head commit SHA (404 means empty repo - no branches yet)
     let headSha = '';
     try {
-      const branchData = await this.apiRequest('GET',
+      const branchData = await this.apiRequest<{ commit?: { id?: string } }>('GET',
         `/projects/${projectId}/repository/branches/${encodeURIComponent(this.config.branch)}`
-      ) as { commit?: { id?: string } };
+      );
       headSha = branchData?.commit?.id || '';
     } catch (error) {
       const msg = (error as Error).message || '';
@@ -1989,7 +1997,7 @@ export class ApiBackend extends SyncBackend {
     for (let page = 1; page <= MAX_PAGES; page++) {
       const items = await this.apiRequest('GET',
         `/projects/${projectId}/repository/tree?ref=${encodeURIComponent(this.config.branch)}&recursive=true&per_page=100&page=${page}`
-      ) as Array<Record<string, unknown>>;
+      );
       if (!Array.isArray(items)) break;
       for (const item of items) {
         if (item.type === 'blob') {
@@ -2014,9 +2022,9 @@ export class ApiBackend extends SyncBackend {
       }
       // Gitea uses 'limit', GitHub uses 'per_page'
       const limitParam = this.config.provider === 'gitea' ? 'limit' : 'per_page';
-      const data = await this.apiRequest('GET',
+      const data = await this.apiRequest<Array<Record<string, unknown>>>('GET',
         `/repos/${this.config.repo}/commits?sha=${this.config.branch}&${limitParam}=${limit}`
-      ) as Array<Record<string, unknown>>;
+      );
       return data.map((commit) => {
         const commitData = commit.commit as Record<string, unknown>;
         const author = commitData.author as Record<string, string>;
@@ -2041,9 +2049,9 @@ export class ApiBackend extends SyncBackend {
     const query = `ref_name=${encodeURIComponent(this.config.branch)}` +
       (filePath ? `&path=${encodeURIComponent(filePath)}` : '') +
       `&per_page=${limit}`;
-    const data = await this.apiRequest('GET',
+    const data = await this.apiRequest<Array<Record<string, unknown>>>('GET',
       `/projects/${this.gitlabProjectId()}/repository/commits?${query}`
-    ) as Array<Record<string, unknown>>;
+    );
     return data.map((commit) => ({
       sha: commit.id as string,
       message: (commit.title as string) || '',
@@ -2061,9 +2069,9 @@ export class ApiBackend extends SyncBackend {
       if (this.config.provider === 'gitlab') {
         return await this.getGitlabCommitDetails(sha);
       }
-      const data = await this.apiRequest('GET',
+      const data = await this.apiRequest<Record<string, unknown>>('GET',
         `/repos/${this.config.repo}/commits/${sha}`
-      ) as Record<string, unknown>;
+      );
       const commitData = data.commit as Record<string, unknown>;
       const author = commitData.author as Record<string, string>;
       const files = (data.files as Array<Record<string, unknown>>) || [];
@@ -2090,9 +2098,9 @@ export class ApiBackend extends SyncBackend {
    * GitLab: single commit detail with changed files (diffs array)
    */
   private async getGitlabCommitDetails(sha: string): Promise<CommitDetail | null> {
-    const data = await this.apiRequest('GET',
+    const data = await this.apiRequest<Record<string, unknown>>('GET',
       `/projects/${this.gitlabProjectId()}/repository/commits/${sha}`
-    ) as Record<string, unknown>;
+    );
     const diffs = (data.diffs as Array<Record<string, unknown>>) || [];
     return {
       sha: data.id as string,
@@ -2141,9 +2149,9 @@ export class ApiBackend extends SyncBackend {
         }
       } else {
         // GitHub and Gitea support the compare API with previous_filename
-        const data = await this.apiRequest('GET',
+        const data = await this.apiRequest<Record<string, unknown>>('GET',
           `/repos/${this.config.repo}/compare/${baseSha}...${headSha}`
-        ) as Record<string, unknown>;
+        );
 
         const files = (data.files as Array<Record<string, unknown>>) || [];
         for (const file of files) {
@@ -2193,15 +2201,15 @@ export class ApiBackend extends SyncBackend {
    */
   private async getCommitParents(sha: string): Promise<string[]> {
     if (this.config.provider === 'gitlab') {
-      const data = await this.apiRequest('GET',
+      const data = await this.apiRequest<Record<string, unknown>>('GET',
         `/projects/${this.gitlabProjectId()}/repository/commits/${sha}`
-      ) as Record<string, unknown>;
+      );
       const ids = data?.parent_ids;
       return Array.isArray(ids) ? ids as string[] : [];
     }
-    const data = await this.apiRequest('GET',
+    const data = await this.apiRequest<Record<string, unknown>>('GET',
       `/repos/${this.config.repo}/commits/${sha}`
-    ) as Record<string, unknown>;
+    );
     const parents = data?.parents;
     if (!Array.isArray(parents)) return [];
     return (parents as Array<Record<string, unknown>>)
@@ -2267,9 +2275,9 @@ export class ApiBackend extends SyncBackend {
       }
       // Gitea uses 'limit', GitHub uses 'per_page'
       const limitParam = this.config.provider === 'gitea' ? 'limit' : 'per_page';
-      const data = await this.apiRequest('GET',
+      const data = await this.apiRequest<Array<Record<string, unknown>>>('GET',
         `/repos/${this.config.repo}/commits?sha=${this.config.branch}&path=${path}&${limitParam}=${limit}`
-      ) as Array<Record<string, unknown>>;
+      );
       return data.map((commit) => {
         const commitData = commit.commit as Record<string, unknown>;
         const author = commitData.author as Record<string, string>;
@@ -2293,17 +2301,17 @@ export class ApiBackend extends SyncBackend {
   async getFileAtCommit(path: string, sha: string): Promise<string | null> {
     try {
       if (this.config.provider === 'gitlab') {
-        const data = await this.apiRequest('GET',
+        const data = await this.apiRequest<FileContent>('GET',
           `/projects/${this.gitlabProjectId()}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(sha)}`
-        ) as FileContent;
+        );
         if (data.encoding === 'base64') {
           return this.decodeBase64Text(data.content);
         }
         return data.content;
       }
-      const data = await this.apiRequest('GET',
+      const data = await this.apiRequest<FileContent>('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${sha}`
-      ) as FileContent;
+      );
       if (data.encoding === 'base64') {
         // For binary files, we still return string for history view
         // The history view is read-only and doesn't need perfect binary handling
@@ -2322,14 +2330,14 @@ export class ApiBackend extends SyncBackend {
   async getBranches(): Promise<string[]> {
     try {
       if (this.config.provider === 'gitlab') {
-        const data = await this.apiRequest('GET',
+        const data = await this.apiRequest<Array<Record<string, string>>>('GET',
           `/projects/${this.gitlabProjectId()}/repository/branches`
-        ) as Array<Record<string, string>>;
+        );
         return data.map((branch) => branch.name);
       }
-      const data = await this.apiRequest('GET',
+      const data = await this.apiRequest<Array<Record<string, string>>>('GET',
         `/repos/${this.config.repo}/branches`
-      ) as Array<Record<string, string>>;
+      );
       return data.map((branch) => branch.name);
     } catch (error) {
       console.error('[HybridGitSync] Failed to get branches:', error);
@@ -2425,7 +2433,7 @@ export class ApiBackend extends SyncBackend {
     method: string,
     path: string,
     body?: Record<string, unknown>,
-    options?: { raw?: boolean }
+    options?: { raw?: boolean; silentNotFound?: boolean }
   ): Promise<T> {
     const [pathPart, queryPart] = path.split('?');
     // Segments already containing '%' are pre-encoded (e.g. GitLab project ids
@@ -2463,7 +2471,11 @@ export class ApiBackend extends SyncBackend {
 
       if (response.status >= 400) {
         const errorText = response.text || '';
-        console.error('[HybridGitSync] apiRequest error:', response.status, errorText);
+        // 404s that callers expect (e.g. branch ref checks) are not errors
+        const isExpected = response.status === 404 && !!options?.silentNotFound;
+        if (!isExpected) {
+          console.error('[HybridGitSync] apiRequest error:', response.status, errorText);
+        }
         throw new Error(`API error ${response.status}: ${errorText}`);
       }
 
@@ -2472,7 +2484,9 @@ export class ApiBackend extends SyncBackend {
       }
       return response.json as T;
     } catch (error) {
-      console.error('[HybridGitSync] apiRequest exception:', error);
+      if (!(options?.silentNotFound && error instanceof Error && error.message.startsWith('API error 404'))) {
+        console.error('[HybridGitSync] apiRequest exception:', error);
+      }
       throw error;
     }
   }

@@ -529,7 +529,7 @@ export default class HybridGitSyncPlugin extends Plugin {
           hint: t('sync.reset.mergeHint'),
         },
       ]);
-      const action = await modal.open();
+      const action = await modal.openAndWait();
       return action === 'mirror' || action === 'merge' ? action : null;
     } finally {
       this.resetPromptActive = false;

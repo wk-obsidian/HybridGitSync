@@ -128,9 +128,10 @@ export class DiffView extends ItemView {
   ): [number, number][] {
     const m = oldLines.length;
     const n = newLines.length;
-    const dp: number[][] = Array.from({ length: m + 1 }, () =>
-      Array(n + 1).fill(0)
-    );
+    const dp: number[][] = [];
+    for (let i = 0; i <= m; i++) {
+      dp.push(new Array<number>(n + 1).fill(0));
+    }
 
     // Build LCS table
     for (let i = 1; i <= m; i++) {

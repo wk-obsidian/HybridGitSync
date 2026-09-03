@@ -12,7 +12,7 @@ export class GitignoreRules {
    * @param configDir Obsidian's config folder name (vault.configDir),
    *   not hardcoded to ".obsidian" since users can customize it.
    */
-  constructor(configDir: string = '.obsidian') {
+  constructor(configDir: string) {
     this.configDir = configDir;
     // Built-in patterns are only used as fallback when no .gitignore exists
     this.builtInPatterns = [

@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, moment } from 'obsidian';
+import { ItemView, WorkspaceLeaf } from 'obsidian';
 
 export const HISTORY_VIEW_TYPE = 'hybrid-git-sync-history';
 
@@ -8,6 +8,32 @@ interface CommitInfo {
   author: string;
   date: string;
   files: string[];
+}
+
+/**
+ * Approximate "x ago" formatting without depending on moment typings
+ * (obsidian re-exports moment but ships no moment type declarations).
+ */
+function formatRelativeTime(dateStr: string): string {
+  const time = new Date(dateStr).getTime();
+  if (isNaN(time)) return '';
+  const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+  if (seconds < 10) return 'just now';
+  if (seconds < 60) return `${seconds} seconds ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes === 1) return 'a minute ago';
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return 'an hour ago';
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  if (days === 1) return 'a day ago';
+  if (days < 30) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months === 1) return 'a month ago';
+  if (months < 12) return `${months} months ago`;
+  const years = Math.floor(months / 12);
+  return years === 1 ? 'a year ago' : `${years} years ago`;
 }
 
 /**
@@ -92,7 +118,7 @@ export class HistoryView extends ItemView {
       detailsEl.createSpan({ text: commit.author, cls: 'commit-author' });
       detailsEl.createSpan({ text: ' · ', cls: 'commit-separator' });
       detailsEl.createSpan({
-        text: moment(commit.date).fromNow(),
+        text: formatRelativeTime(commit.date),
         cls: 'commit-date',
       });
       detailsEl.createSpan({ text: ' · ', cls: 'commit-separator' });
