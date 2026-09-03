@@ -5,21 +5,48 @@ import { requestDeviceCode, pollForAccessToken, listRepos } from './auth/github-
 import { OAuthModal } from './auth/oauth-modal';
 import { GitignoreRules } from './utils/gitignore';
 
+export interface ConfirmModalAction {
+  text: string;
+  /** Result value resolved by open(); null is reserved for cancel/dismiss */
+  value: string;
+  /** Optional short description rendered under the button */
+  hint?: string;
+  /** Mark button as destructive (mod-warning) */
+  warning?: boolean;
+}
+
 /**
- * Confirmation modal for clearing sync state
+ * Modal prompting the user to pick one of several actions.
+ * `open()` resolves with the selected action's value, or null when
+ * canceled/dismissed.
  */
-class ConfirmModal extends Modal {
+export class ConfirmModal extends Modal {
   private title: string;
   private message: string;
-  private confirmText: string;
-  private onConfirm: () => Promise<void>;
+  private actions: ConfirmModalAction[];
+  private resolveFn: ((value: string | null) => void) | null = null;
 
-  constructor(app: App, title: string, message: string, confirmText: string, onConfirm: () => Promise<void>) {
+  constructor(app: App, title: string, message: string, actions: ConfirmModalAction[]) {
     super(app);
     this.title = title;
     this.message = message;
-    this.confirmText = confirmText;
-    this.onConfirm = onConfirm;
+    this.actions = actions;
+  }
+
+  open(): Promise<string | null> {
+    if (this.resolveFn) return Promise.resolve(null); // already open
+    return new Promise<string | null>((resolve) => {
+      this.resolveFn = resolve;
+      super.open();
+    });
+  }
+
+  private settle(value: string | null): void {
+    if (this.resolveFn) {
+      const resolve = this.resolveFn;
+      this.resolveFn = null;
+      resolve(value);
+    }
   }
 
   onOpen(): void {
@@ -27,30 +54,40 @@ class ConfirmModal extends Modal {
     contentEl.empty();
 
     contentEl.createEl('h2', { text: this.title });
-    contentEl.createEl('p', { text: this.message });
+    for (const line of this.message.split('\n')) {
+      contentEl.createEl('p', { text: line });
+    }
 
     const buttonEl = contentEl.createDiv('modal-button-container');
     buttonEl.style.display = 'flex';
-    buttonEl.style.justifyContent = 'flex-end';
+    buttonEl.style.flexDirection = 'column';
+    buttonEl.style.alignItems = 'stretch';
     buttonEl.style.gap = '8px';
     buttonEl.style.marginTop = '16px';
+
+    for (const action of this.actions) {
+      const btn = buttonEl.createEl('button', { text: action.text });
+      if (action.warning) btn.addClass('mod-warning');
+      btn.onclick = () => {
+        this.settle(action.value);
+        this.close();
+      };
+      if (action.hint) {
+        buttonEl.createEl('div', {
+          text: action.hint,
+          cls: 'setting-item-description',
+        });
+      }
+    }
 
     // Cancel button
     const cancelBtn = buttonEl.createEl('button');
     cancelBtn.textContent = t('ui.cancel');
     cancelBtn.onclick = () => this.close();
-
-    // Confirm button
-    const confirmBtn = buttonEl.createEl('button');
-    confirmBtn.textContent = this.confirmText;
-    confirmBtn.addClass('mod-warning');
-    confirmBtn.onclick = async () => {
-      await this.onConfirm();
-      this.close();
-    };
   }
 
   onClose(): void {
+    this.settle(null); // dismiss (ESC/close) counts as cancel
     const { contentEl } = this;
     contentEl.empty();
   }
@@ -435,15 +472,21 @@ export class SettingsTab extends PluginSettingTab {
         .setButtonText(t('settings.clearSyncStateButton'))
         .setWarning()
         .onClick(() => {
-          new ConfirmModal(
+          const modal = new ConfirmModal(
             this.app,
             t('settings.clearSyncStateConfirmTitle'),
             t('settings.clearSyncStateConfirmDesc'),
-            t('settings.clearSyncStateButton'),
-            async () => {
-              await this.plugin.clearSyncState();
+            [{
+              text: t('settings.clearSyncStateButton'),
+              value: 'confirm',
+              warning: true,
+            }]
+          );
+          void modal.open().then((action) => {
+            if (action === 'confirm') {
+              void this.plugin.clearSyncState();
             }
-          ).open();
+          });
         }));
   }
 

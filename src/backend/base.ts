@@ -35,6 +35,8 @@ export interface SyncResult {
   skipped?: Array<{ path: string; size: number; reason: string }>;
   conflicts?: string[];
   error?: Error;
+  /** Machine-readable outcome code for special handling (e.g. remote-reset prompt) */
+  code?: 'remote-reset' | 'unverifiable';
 }
 
 export interface SyncStatus {

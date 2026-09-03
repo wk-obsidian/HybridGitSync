@@ -12,6 +12,14 @@ export default {
   'sync.skipped.cannotReach': '无法连接远程。请检查网络连接。',
   'sync.skipped.emptyRemote': '远程返回空文件列表。跳过同步以防止数据丢失。',
   'sync.skipped.resolvingConflicts': '同步跳过：正在解决冲突',
+  'sync.reset.detectedTitle': '检测到远端仓库已重置',
+  'sync.reset.detectedMessage': '本地同步状态记录了 {count} 个文件，但远端仓库历史已与上次同步不一致（可能被清空或重建）。为避免误删本地文件，本次同步已暂停。请选择处理方式：',
+  'sync.reset.mirror': '以本地重建远端',
+  'sync.reset.mirrorHint': '远端将被完全覆盖为本地内容，远端独有文件会被删除。',
+  'sync.reset.merge': '合并同步',
+  'sync.reset.mergeHint': '上传本地文件、下载远端独有文件；两边同名且内容不同的以远端为准。',
+  'sync.reset.skipped': '为避免重复打扰，重置确认已抑制。本次同步已暂停，可稍后手动点击同步或在设置中清除同步状态。',
+  'sync.reset.unverifiable': '无法验证远端历史，已跳过本次同步以防误删。可稍后重试。',
 
   // 仓库初始化
   'repo.initializing': '正在初始化空仓库...',

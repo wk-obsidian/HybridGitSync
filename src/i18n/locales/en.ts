@@ -12,6 +12,14 @@ export default {
   'sync.skipped.cannotReach': 'Cannot reach remote. Check network connection.',
   'sync.skipped.emptyRemote': 'Remote returned empty file list. Skipping sync to prevent data loss.',
   'sync.skipped.resolvingConflicts': 'Sync skipped: resolving conflicts',
+  'sync.reset.detectedTitle': 'Remote repository reset detected',
+  'sync.reset.detectedMessage': 'Local sync state records {count} file(s), but the remote history no longer matches the last sync (it may have been wiped or recreated). This sync was paused to prevent local files from being deleted by mistake. Choose how to proceed:',
+  'sync.reset.mirror': 'Rebuild remote from local',
+  'sync.reset.mirrorHint': 'The remote will be overwritten to exactly match local content; files that only exist remotely will be deleted.',
+  'sync.reset.merge': 'Merge sync',
+  'sync.reset.mergeHint': 'Upload local files, download files that only exist remotely; when the same file differs on both sides, the remote version wins.',
+  'sync.reset.skipped': 'Reset prompt suppressed to avoid interruptions. This sync was paused - you can trigger sync again later or clear the sync state in settings.',
+  'sync.reset.unverifiable': 'Could not verify remote history. Sync skipped to prevent data loss. Try again later.',
 
   // Repository initialization
   'repo.initializing': 'Initializing empty repository...',

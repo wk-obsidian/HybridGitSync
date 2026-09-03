@@ -1,5 +1,5 @@
 import { EventRef, Notice, Plugin, TFile } from 'obsidian';
-import { PluginSettings, SettingsTab, DEFAULT_SETTINGS } from './settings';
+import { PluginSettings, SettingsTab, DEFAULT_SETTINGS, ConfirmModal } from './settings';
 import { getErrorMessage } from './utils/error';
 import { SyncBackend } from './backend/base';
 import { GitBackend } from './backend/git-backend';
@@ -33,6 +33,11 @@ export default class HybridGitSyncPlugin extends Plugin {
   private fileChangeRefs: EventRef[] = [];
   private isResolvingConflicts = false;
   private pauseFileChangeSync = false;
+  // Remote-reset prompt state: throttle repeat prompts (auto-sync and
+  // file-change triggers fire often) and prevent concurrent duplicates
+  private lastResetPromptAt = 0;
+  private resetPromptActive = false;
+  private readonly RESET_PROMPT_INTERVAL_MS = 10 * 60 * 1000;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -328,6 +333,29 @@ export default class HybridGitSyncPlugin extends Plugin {
       try {
         const isEmpty = await this.backend.isEmptyRepo();
         if (isEmpty) {
+          const apiBackend = this.backend;
+          const stateManager = apiBackend.getStateManager();
+          await stateManager.load();
+
+          // A repo we previously synced against is now empty - almost always
+          // wiped and recreated. Never auto-initialize on top of a stale
+          // cache: the sync engine would see every cached file as "deleted
+          // remotely" and delete it locally. Ask the user first.
+          if (stateManager.cachedPathCount > 0) {
+            const action = await this.askRemoteResetAction(
+              t('sync.reset.detectedMessage', { count: String(stateManager.cachedPathCount) })
+            );
+            if (action === null) {
+              this.log('Sync aborted: remote repo is empty but sync state exists');
+              return;
+            }
+            // The repo is empty, so both actions converge: clear the stale
+            // cache and rebuild from local via the normal init + sync flow.
+            this.log('Remote reset action chosen:', action);
+            stateManager.clear();
+            await stateManager.save();
+          }
+
           this.log('Empty repository detected during sync, initializing...');
           this.showNotice(t('repo.initializing'));
           const initResult = await this.backend.initializeRepo();
@@ -368,6 +396,49 @@ export default class HybridGitSyncPlugin extends Plugin {
 
         const result = await this.backend.sync();
 
+        // Remote repo was reset/recreated (or the vault was pointed at a new
+        // repo) - ask the user how to proceed instead of showing a generic
+        // failure. Only API mode returns these codes.
+        if (this.backend instanceof ApiBackend && result.code === 'remote-reset') {
+          const apiBackend = this.backend;
+          const stateManager = apiBackend.getStateManager();
+          await stateManager.load();
+          const action = await this.askRemoteResetAction(
+            result.message || t('sync.reset.detectedMessage', { count: String(stateManager.cachedPathCount) })
+          );
+          if (action === null) {
+            this.statusBar.setState('idle');
+            this.log('Sync aborted by user after remote reset detection');
+            return;
+          }
+          stateManager.clear();
+          await stateManager.save();
+          if (action === 'mirror') {
+            // Rebuild the remote as an exact copy of the local vault
+            this.log('Remote reset: rebuilding remote from local (mirror)');
+            this.statusBar.setState('syncing');
+            const pushResult = await apiBackend.push();
+            if (pushResult.success) {
+              this.statusBar.setState('idle');
+              this.showNotice(t('notice.pushCompleted'));
+            } else {
+              this.statusBar.setState('error', pushResult.message);
+              this.showNotice(t('notice.pushFailed', { message: pushResult.message }));
+            }
+          } else {
+            // Merge: full sync with first-sync semantics (cache is now empty)
+            this.log('Remote reset: re-syncing with cleared state (merge)');
+            void this.performSync();
+          }
+          return;
+        }
+        if (result.code === 'unverifiable') {
+          // Could not confirm the remote history - skip rather than risk it
+          this.statusBar.setState('error', result.message);
+          this.showNotice(result.message);
+          return;
+        }
+
         if (result.success) {
           this.statusBar.setState('idle');
           this.log('Sync completed', result.message);
@@ -395,6 +466,45 @@ export default class HybridGitSyncPlugin extends Plugin {
         this.log('Sync error', error);
       }
     });
+  }
+
+  /**
+   * Ask the user how to proceed after detecting that the remote repository
+   * was reset/recreated (history unrelated to the last synced state).
+   *
+   * - 'mirror': rebuild the remote as an exact copy of the local vault
+   * - 'merge': clear sync state and run a full sync (first-sync semantics)
+   * - null: canceled, or the prompt was suppressed (already shown recently /
+   *   another prompt is open) - the caller must abort the sync
+   */
+  private async askRemoteResetAction(message: string): Promise<'mirror' | 'merge' | null> {
+    const now = Date.now();
+    if (this.resetPromptActive || now - this.lastResetPromptAt < this.RESET_PROMPT_INTERVAL_MS) {
+      // Auto-sync / file-change triggers fire often - do not re-prompt
+      this.showNotice(t('sync.reset.skipped'));
+      return null;
+    }
+    this.resetPromptActive = true;
+    this.lastResetPromptAt = now;
+    try {
+      const modal = new ConfirmModal(this.app, t('sync.reset.detectedTitle'), message, [
+        {
+          text: t('sync.reset.mirror'),
+          value: 'mirror',
+          hint: t('sync.reset.mirrorHint'),
+          warning: true,
+        },
+        {
+          text: t('sync.reset.merge'),
+          value: 'merge',
+          hint: t('sync.reset.mergeHint'),
+        },
+      ]);
+      const action = await modal.open();
+      return action === 'mirror' || action === 'merge' ? action : null;
+    } finally {
+      this.resetPromptActive = false;
+    }
   }
 
   /**

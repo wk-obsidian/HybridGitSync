@@ -8,6 +8,7 @@ export interface SyncState {
   files: Record<string, string>; // path -> content hash
   remoteShas: Record<string, string>; // path -> remote git blob SHA (cached)
   lastSyncHeadSha?: string; // HEAD SHA at last sync, for compare API rename detection
+  repoId?: string; // backend identity (provider|baseUrl|repo|branch) the cache belongs to
 }
 
 /**
@@ -27,6 +28,21 @@ export class SyncStateManager {
     this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
     this.debug = debug;
     this.logger = new Logger('SyncState', debug ? LogLevel.DEBUG : LogLevel.INFO);
+  }
+
+  /**
+   * Get the repo identity this cache was synced against (may be undefined for
+   * state files written before repo identity tracking was added)
+   */
+  getRepoId(): string | undefined {
+    return this.state.repoId;
+  }
+
+  /**
+   * Set the repo identity the cache belongs to (provider|baseUrl|repo|branch)
+   */
+  setRepoId(repoId: string): void {
+    this.state.repoId = repoId;
   }
 
   private log(...args: unknown[]): void {
@@ -94,6 +110,13 @@ export class SyncStateManager {
    */
   clear(): void {
     this.state = { lastSyncTime: '', files: {}, remoteShas: {} };
+  }
+
+  /**
+   * Number of distinct paths recorded in either cache map
+   */
+  get cachedPathCount(): number {
+    return new Set([...Object.keys(this.state.files), ...Object.keys(this.state.remoteShas)]).size;
   }
 
   /**

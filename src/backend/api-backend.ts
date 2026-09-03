@@ -517,6 +517,7 @@ export class ApiBackend extends SyncBackend {
         }
       }
 
+      this.stateManager.setRepoId(this.buildRepoId());
       await this.stateManager.save();
 
       if (errors.length > 0) {
@@ -577,15 +578,79 @@ export class ApiBackend extends SyncBackend {
         };
       }
 
-      // Safety check: if remoteMap is empty but we have cached SHAs, something is wrong
+      // ===== Remote reset protection =====
+      // An empty or rewritten remote combined with a non-empty local cache
+      // means the repo was reset/recreated (or the vault was pointed at a
+      // different repo). Cached files missing from the remote would then be
+      // misread as "deleted remotely" and deleted locally - so abort before
+      // computing any changes. Everything above this point is read-only, so
+      // early returns here are safe.
+      const cachedKnown = this.stateManager.getKnownFiles();
       const cachedRemoteShas = this.stateManager.getAllRemoteShas();
-      this.log('Cached remote SHAs:', cachedRemoteShas.size);
-      if (remoteMap.size === 0 && cachedRemoteShas.size > 0) {
+      const hasCachedFiles = cachedKnown.size > 0 || cachedRemoteShas.size > 0;
+      const cachedHeadSha = this.stateManager.getLastSyncHeadSha();
+      const repoId = this.buildRepoId();
+      const cachedRepoId = this.stateManager.getRepoId();
+      const repoIdChanged = !!cachedRepoId && cachedRepoId !== repoId;
+      this.log('Cached files:', cachedKnown.size, '| Cached remote SHAs:', cachedRemoteShas.size, '| repoId match:', !repoIdChanged);
+
+      // Remote file list empty while we have cached files: something is wrong
+      if (remoteMap.size === 0 && hasCachedFiles) {
+        if (currentHeadSha && cachedHeadSha && currentHeadSha !== cachedHeadSha) {
+          // History advanced but every file was removed via commits - almost
+          // always a deliberate wipe + rebuild. Ask the user instead of
+          // silently skipping (and never propagate "deletions").
+          return this.remoteResetResult();
+        }
         console.warn('[HybridGitSync] Remote returned empty file list, skipping sync to prevent data loss');
         return {
           success: false,
           message: 'Remote returned empty file list. Skipping sync to prevent data loss.',
         };
+      }
+
+      // Remote history moved since last sync: before trusting the diff below,
+      // verify the cached HEAD still exists in the remote lineage.
+      if (hasCachedFiles && cachedHeadSha && currentHeadSha && cachedHeadSha !== currentHeadSha) {
+        // Files recorded for a different repo -> cache is stale by definition
+        // (skip the walk, ancestry would fail anyway). Otherwise walk only when
+        // a cached file is missing from the remote - the dangerous signal;
+        // when every cached file is still there the remote is just ahead.
+        let needsVerification = repoIdChanged;
+        if (!needsVerification) {
+          for (const path of cachedKnown.keys()) {
+            if (!remoteMap.has(path)) { needsVerification = true; break; }
+          }
+        }
+        if (!needsVerification) {
+          for (const path of cachedRemoteShas.keys()) {
+            if (!remoteMap.has(path)) { needsVerification = true; break; }
+          }
+        }
+        if (needsVerification) {
+          const verdict = await this.checkRemoteHistory(cachedHeadSha, currentHeadSha);
+          this.log('Remote history check:', verdict);
+          if (verdict === 'reset') return this.remoteResetResult();
+          if (verdict === 'unverifiable') {
+            return {
+              success: false,
+              code: 'unverifiable',
+              message: t('sync.reset.unverifiable'),
+              error: new Error('Unable to verify remote history'),
+            };
+          }
+          // healthy: cached HEAD is an ancestor of the current tip, so the
+          // deletions observed below are genuine - proceed normally
+        }
+        // History confirmed to be the same lineage (e.g. default branch was
+        // renamed master -> main): adopt the current identity silently.
+        if (repoIdChanged) {
+          this.stateManager.setRepoId(repoId);
+        }
+      } else if (hasCachedFiles && repoIdChanged) {
+        // Same HEAD as last sync means the cache is still valid - adopt the
+        // current identity silently.
+        this.stateManager.setRepoId(repoId);
       }
 
       // Step 4: Determine which remote files actually changed
@@ -1233,6 +1298,7 @@ export class ApiBackend extends SyncBackend {
       this.stateManager.setLastSyncHeadSha(currentHeadSha);
 
       // Step 14: Save sync state
+      this.stateManager.setRepoId(this.buildRepoId());
       await this.stateManager.save();
 
       // Build message using i18n
@@ -2098,6 +2164,101 @@ export class ApiBackend extends SyncBackend {
     }
 
     return renames;
+  }
+
+  /**
+   * Build a SyncResult signalling that the remote history is unrelated to the
+   * last synced state (repo reset/recreated or vault pointed at a new repo).
+   * The caller must not have performed any writes before returning this.
+   */
+  private remoteResetResult(): SyncResult {
+    this.logger.warn('Remote history broken or repo reset - aborting sync to prevent data loss');
+    return {
+      success: false,
+      code: 'remote-reset',
+      message: t('sync.reset.detectedMessage', { count: String(this.stateManager.cachedPathCount) }),
+      error: new Error('remote-reset'),
+    };
+  }
+
+  /**
+   * Identity of the repository this cache belongs to.
+   * Stored in sync state so a cache synced against another repo/branch is
+   * recognized as stale instead of being reused silently.
+   */
+  private buildRepoId(): string {
+    return `${this.config.provider}|${this.baseUrl}|${this.config.repo}|${this.config.branch}`;
+  }
+
+  /**
+   * Get the parent commit SHAs of a commit (empty for a root commit).
+   * GitHub/Gitea expose `parents` on the commit endpoint; GitLab uses
+   * `parent_ids` on the same-shaped response.
+   */
+  private async getCommitParents(sha: string): Promise<string[]> {
+    if (this.config.provider === 'gitlab') {
+      const data = await this.apiRequest('GET',
+        `/projects/${this.gitlabProjectId()}/repository/commits/${sha}`
+      ) as Record<string, unknown>;
+      const ids = data?.parent_ids;
+      return Array.isArray(ids) ? ids as string[] : [];
+    }
+    const data = await this.apiRequest('GET',
+      `/repos/${this.config.repo}/commits/${sha}`
+    ) as Record<string, unknown>;
+    const parents = data?.parents;
+    if (!Array.isArray(parents)) return [];
+    return (parents as Array<Record<string, unknown>>)
+      .map(p => typeof p?.sha === 'string' ? p.sha : '')
+      .filter(s => s !== '');
+  }
+
+  /**
+   * Walk the remote first-parent chain from `currentHeadSha` up to
+   * `cachedHeadSha` (max 500 steps) to verify the cached HEAD still exists in
+   * the remote lineage.
+   *
+   * - healthy: cached HEAD is an ancestor of the current tip (deletions seen
+   *   in the diff are genuine - proceed)
+   * - reset: walked to the root without finding the cached HEAD (history was
+   *   rewritten/recreated - ask the user, never propagate "deletions")
+   * - unverifiable: exceeded the step limit, hit a cycle, or the API failed
+   *   (refuse to guess - skip the sync)
+   *
+   * Parent-walk is used instead of the compare API because Gitea only gained
+   * a compare endpoint in v1.22 (and it lacks ahead/behind fields) and
+   * GitLab's compare semantics are direction-sensitive.
+   */
+  private async checkRemoteHistory(
+    cachedHeadSha: string,
+    currentHeadSha: string
+  ): Promise<'healthy' | 'reset' | 'unverifiable'> {
+    const MAX_STEPS = 500;
+    const visited = new Set<string>();
+    let sha = currentHeadSha;
+
+    for (let i = 0; i <= MAX_STEPS; i++) {
+      if (sha === cachedHeadSha) return 'healthy';
+      if (visited.has(sha)) return 'unverifiable'; // cycle - cannot verify
+      visited.add(sha);
+
+      let parents: string[];
+      try {
+        parents = await this.getCommitParents(sha);
+      } catch (error) {
+        this.log('checkRemoteHistory: error fetching commit', sha, getErrorMessage(error));
+        return 'unverifiable';
+      }
+      if (parents.length === 0) {
+        // Walked past the root without finding the cached HEAD
+        this.log('checkRemoteHistory: reached root at', sha, 'without finding', cachedHeadSha);
+        return 'reset';
+      }
+      sha = parents[0];
+    }
+
+    this.log('checkRemoteHistory: exceeded', MAX_STEPS, 'steps');
+    return 'unverifiable';
   }
 
   /**
