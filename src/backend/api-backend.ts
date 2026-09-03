@@ -155,11 +155,11 @@ export class ApiBackend extends SyncBackend {
       }
       if (this.config.provider === 'gitea') {
         // Gitea has no Git Data API - check the branches endpoint instead
-        // (a 404 here means an empty repo, handled by the catch below)
+        // Gitea returns null (not []) for empty repos
         const branches = await this.apiRequest('GET',
           `/repos/${this.config.repo}/branches`
         );
-        return Array.isArray(branches) && branches.length === 0;
+        return !branches || (Array.isArray(branches) && branches.length === 0);
       }
       // GitHub: a missing branch ref (404) or an empty-repo error (409) both
       // mean the repo has no commits yet
@@ -1689,7 +1689,9 @@ export class ApiBackend extends SyncBackend {
         try {
           const existing = await this.apiRequest<{ sha: string }>(
             'GET',
-            `/repos/${this.config.repo}/contents/${file.path}`
+            `/repos/${this.config.repo}/contents/${file.path}`,
+            undefined,
+            { silentNotFound: true }
           );
           existingSha = existing.sha;
         } catch {
@@ -1736,7 +1738,9 @@ export class ApiBackend extends SyncBackend {
         let action = 'create';
         try {
           await this.apiRequest('GET',
-            `/projects/${projectId}/repository/files/${encodedFilePath}?ref=${encodeURIComponent(this.config.branch)}`
+            `/projects/${projectId}/repository/files/${encodedFilePath}?ref=${encodeURIComponent(this.config.branch)}`,
+            undefined,
+            { silentNotFound: true }
           );
           action = 'update';
         } catch {
@@ -1932,16 +1936,29 @@ export class ApiBackend extends SyncBackend {
     const fileMap = new Map<string, string>();
 
     try {
-      // Gitea returns an array, GitHub returns a single object
-      const refData = await this.apiRequest('GET',
-        `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
-      );
-      const branchInfo = (Array.isArray(refData) ? refData[0] : refData);
+      let headSha: string;
 
-      if (!branchInfo?.object?.sha) {
-        throw new Error(`Branch not found: ${this.config.branch}`);
+      if (this.config.provider === 'gitea') {
+        // Gitea has no Git Data API — use branches endpoint instead
+        const branchData = await this.apiRequest<{ commit?: { sha?: string } }>('GET',
+          `/repos/${this.config.repo}/branches/${this.config.branch}`,
+          { silentNotFound: true }
+        );
+        headSha = branchData?.commit?.sha || '';
+        if (!headSha) {
+          return { tree: fileMap, headSha: '' };
+        }
+      } else {
+        // GitHub: use Git Data API
+        const refData = await this.apiRequest('GET',
+          `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+        );
+        const branchInfo = (Array.isArray(refData) ? refData[0] : refData);
+        if (!branchInfo?.object?.sha) {
+          throw new Error(`Branch not found: ${this.config.branch}`);
+        }
+        headSha = branchInfo.object.sha;
       }
-      const headSha = branchInfo.object.sha;
 
       // Gitea uses ?recursive=true, GitHub uses ?recursive=1
       const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
