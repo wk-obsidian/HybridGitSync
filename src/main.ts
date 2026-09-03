@@ -183,6 +183,14 @@ export default class HybridGitSyncPlugin extends Plugin {
       this.backend = this.createApiBackend();
     }
 
+    // Validate API repo format (must be "owner/repo", not a token or URL)
+    if (!this.isApiRemoteUrlValid()) {
+      this.showNotice(t('sync.skipped.badRemoteUrl'));
+      this.statusBar.setState('idle', 'Not configured');
+      this.log('Invalid remote repository format, skipping availability check');
+      return;
+    }
+
     // Check availability
     const available = await this.backend.isAvailable();
     if (!available) {
@@ -210,6 +218,16 @@ export default class HybridGitSyncPlugin extends Plugin {
       baseUrl: this.settings.apiBaseUrl || undefined,
       commitMessage: this.settings.commitMessage,
     }, this.gitignore, this.settings.debug);
+  }
+
+  /**
+   * API mode requires the remote repository as "owner/repo" (GitLab:
+   * "namespace/project"), not a full URL or token.
+   */
+  private isApiRemoteUrlValid(): boolean {
+    if (!(this.backend instanceof ApiBackend)) return true;
+    if (!this.settings.remoteUrl) return false;
+    return this.settings.remoteUrl.includes('/') && !this.settings.remoteUrl.includes('://');
   }
 
   /**
@@ -262,6 +280,15 @@ export default class HybridGitSyncPlugin extends Plugin {
     if (!this.settings.remoteUrl) {
       this.log('Sync skipped: no remote URL');
       this.showNotice(t('sync.skipped.noRemote'));
+      return;
+    }
+
+    // Validate API repo format before the availability check so the
+    // notice points at the real problem instead of "backend not available"
+    if (!this.isApiRemoteUrlValid()) {
+      this.log('Sync skipped: invalid remote repository format');
+      this.statusBar.setState('error', 'Bad remote URL');
+      this.showNotice(t('sync.skipped.badRemoteUrl'));
       return;
     }
 

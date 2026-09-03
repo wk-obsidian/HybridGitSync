@@ -245,11 +245,14 @@ export class SettingsTab extends PluginSettingTab {
     }
 
     // Manual remote URL input
+    const remoteUrlPlaceholder = this.plugin.settings.apiProvider === 'gitlab'
+      ? 'namespace/project'
+      : 'owner/repo';
     new Setting(el)
       .setName(t('settings.remoteUrl'))
       .setDesc(t('settings.remoteUrlDesc'))
       .addText(cb => cb
-        .setPlaceholder('owner/repo')
+        .setPlaceholder(remoteUrlPlaceholder)
         .setValue(this.plugin.settings.remoteUrl)
         .onChange(async (value) => {
           this.plugin.settings.remoteUrl = value;
@@ -282,16 +285,23 @@ export class SettingsTab extends PluginSettingTab {
           this.display();
         }));
 
-    // Show different description for Gitea
+    // Show provider-specific description and placeholder for the API base URL
     const customUrlDesc = this.plugin.settings.apiProvider === 'gitea'
       ? t('settings.customApiUrlDescGitea')
-      : t('settings.customApiUrlDesc');
+      : this.plugin.settings.apiProvider === 'gitlab'
+        ? t('settings.customApiUrlDescGitlab')
+        : t('settings.customApiUrlDesc');
+    const customUrlPlaceholder = this.plugin.settings.apiProvider === 'gitea'
+      ? 'https://your-gitea.com/api/v1'
+      : this.plugin.settings.apiProvider === 'gitlab'
+        ? 'https://gitlab.com/api/v4'
+        : 'https://api.github.com';
 
     new Setting(el)
       .setName(t('settings.customApiUrl'))
       .setDesc(customUrlDesc)
       .addText(cb => cb
-        .setPlaceholder('https://your-gitea.com/api/v1')
+        .setPlaceholder(customUrlPlaceholder)
         .setValue(this.plugin.settings.apiBaseUrl)
         .onChange(async (value) => {
           this.plugin.settings.apiBaseUrl = value;

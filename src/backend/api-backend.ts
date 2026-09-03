@@ -95,6 +95,14 @@ export class ApiBackend extends SyncBackend {
     this.config = config;
     this.name = `api-${config.provider}`;
     this.baseUrl = config.baseUrl || this.getDefaultBaseUrl(config.provider);
+    // GitLab serves its API under /api/v4 - normalize self-hosted base URLs
+    // that only provide the host (e.g. https://jihulab.com/)
+    if (config.provider === 'gitlab') {
+      const normalized = this.baseUrl.replace(/\/+$/, '');
+      if (!normalized.endsWith('/api/v4')) {
+        this.baseUrl = `${normalized}/api/v4`;
+      }
+    }
     this.stateManager = new SyncStateManager(vault);
     this.gitignore = gitignore || new GitignoreRules();
     this.debug = debug;
@@ -116,14 +124,23 @@ export class ApiBackend extends SyncBackend {
 
   async isAvailable(): Promise<boolean> {
     try {
-      const repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
+      let repoInfo: RepoInfo;
+      if (this.config.provider === 'gitlab') {
+        // GitLab: project lookup by URL-encoded path (namespace%2Fproject)
+        repoInfo = await this.apiRequest('GET',
+          `/projects/${this.gitlabProjectId()}`
+        ) as RepoInfo;
+      } else {
+        repoInfo = await this.apiRequest('GET', `/repos/${this.config.repo}`) as RepoInfo;
+      }
       // Auto-detect default branch if not specified or invalid
       if (repoInfo.default_branch && this.config.branch !== repoInfo.default_branch) {
         this.log(`Auto-correcting branch: ${this.config.branch} → ${repoInfo.default_branch}`);
         this.config.branch = repoInfo.default_branch;
       }
       return true;
-    } catch {
+    } catch (error) {
+      console.error('[HybridGitSync] Backend availability check failed:', getErrorMessage(error));
       return false;
     }
   }
@@ -133,6 +150,13 @@ export class ApiBackend extends SyncBackend {
    */
   async isEmptyRepo(): Promise<boolean> {
     try {
+      if (this.config.provider === 'gitlab') {
+        // GitLab: an empty repository has no branches
+        const branches = await this.apiRequest('GET',
+          `/projects/${this.gitlabProjectId()}/repository/branches`
+        );
+        return Array.isArray(branches) && branches.length === 0;
+      }
       await this.apiRequest('GET',
         `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
       );
@@ -218,11 +242,8 @@ export class ApiBackend extends SyncBackend {
    * GitLab: Commits API with actions array
    */
   private async initializeGitlabRepo(content: string): Promise<void> {
-    // GitLab uses project path encoded: owner/repo -> owner%2Frepo
-    const projectId = encodeURIComponent(this.config.repo);
-
     await this.apiRequest('POST',
-      `/projects/${projectId}/repository/commits`,
+      `/projects/${this.gitlabProjectId()}/repository/commits`,
       {
         branch: this.config.branch,
         commit_message: 'Initial commit',
@@ -230,6 +251,7 @@ export class ApiBackend extends SyncBackend {
           action: 'create',
           file_path: '.gitignore',
           content: content,
+          encoding: 'text',
         }],
       }
     );
@@ -243,8 +265,8 @@ export class ApiBackend extends SyncBackend {
    */
   private async createBlob(content: string | ArrayBuffer, isBinary: boolean): Promise<string> {
     const base64Content = isBinary
-      ? this.encodeBase64Binary(content)
-      : this.encodeBase64Text(content);
+      ? this.encodeBase64Binary(content as ArrayBuffer)
+      : this.encodeBase64Text(content as string);
 
     const data = await this.apiRequest('POST',
       `/repos/${this.config.repo}/git/blobs`,
@@ -860,12 +882,15 @@ export class ApiBackend extends SyncBackend {
 
       if (filesToPush.length > 0 || filesToDelete.length > 0) {
         try {
-          // Get current commit SHA
-          const refData = await this.apiRequest('GET',
-            `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
-          );
-          const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
-          let currentCommitSha = branchInfo?.object?.sha;
+          // Get current commit SHA - only GitHub's deletion flow needs it
+          let currentCommitSha: string | undefined;
+          if (this.config.provider === 'github') {
+            const refData = await this.apiRequest('GET',
+              `/repos/${this.config.repo}/git/refs/heads/${this.config.branch}`
+            );
+            const branchInfo = (Array.isArray(refData) ? refData[0] : refData) as GitRef;
+            currentCommitSha = branchInfo?.object?.sha;
+          }
 
           // Step 10a: Calculate file sizes and check for large files
           const BATCH_SIZE_THRESHOLD = 100 * 1024 * 1024; // 100MB
@@ -894,13 +919,18 @@ export class ApiBackend extends SyncBackend {
             }
           }
 
-          // Step 10b: Split into batches based on total size
+          // Step 10b: Split into batches based on total size (plus GitLab's
+          // 100-actions-per-request cap on the Commits API)
+          const maxActionsPerBatch = this.config.provider === 'gitlab' ? 100 : Infinity;
           const batches: Array<Array<{ path: string; size: number }>> = [];
           let currentBatch: Array<{ path: string; size: number }> = [];
           let currentBatchSize = 0;
 
           for (const file of filesWithSize) {
-            if (currentBatchSize + file.size > BATCH_SIZE_THRESHOLD && currentBatch.length > 0) {
+            if (currentBatch.length > 0 && (
+              currentBatchSize + file.size > BATCH_SIZE_THRESHOLD ||
+              currentBatch.length >= maxActionsPerBatch
+            )) {
               batches.push(currentBatch);
               currentBatch = [];
               currentBatchSize = 0;
@@ -925,7 +955,7 @@ export class ApiBackend extends SyncBackend {
               this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
 
               // Read file contents
-              const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+              const filesWithContent: { path: string; content: string | ArrayBuffer; isBinary: boolean; contentHash: string }[] = [];
               for (const file of batch) {
                 try {
                   const isBinary = isBinaryFile(file.path);
@@ -941,11 +971,7 @@ export class ApiBackend extends SyncBackend {
                     ? await this.gitBlobSha1Binary(content as ArrayBuffer)
                     : await this.gitBlobSha1(content as string);
 
-                  const textContent = isBinary
-                    ? this.encodeBase64Binary(content as ArrayBuffer)
-                    : content as string;
-
-                  filesWithContent.push({ path: file.path, content: textContent, contentHash });
+                  filesWithContent.push({ path: file.path, content, isBinary, contentHash });
                 } catch (e) {
                   errors.push(`read ${file.path}: ${(e as Error).message}`);
                 }
@@ -960,7 +986,7 @@ export class ApiBackend extends SyncBackend {
               const deletionsForBatch = isLastBatch ? filesToDelete : [];
 
               const result = await this.batchCommitWithCommitsApi(
-                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                filesWithContent.map(f => ({ path: f.path, content: f.content, isBinary: f.isBinary })),
                 commitMessage,
                 deletionsForBatch
               );
@@ -990,7 +1016,7 @@ export class ApiBackend extends SyncBackend {
               this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
 
               // Read file contents
-              const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+              const filesWithContent: { path: string; content: string | ArrayBuffer; isBinary: boolean; contentHash: string }[] = [];
               for (const file of batch) {
                 try {
                   const isBinary = isBinaryFile(file.path);
@@ -1006,11 +1032,7 @@ export class ApiBackend extends SyncBackend {
                     ? await this.gitBlobSha1Binary(content as ArrayBuffer)
                     : await this.gitBlobSha1(content as string);
 
-                  const textContent = isBinary
-                    ? this.encodeBase64Binary(content as ArrayBuffer)
-                    : content as string;
-
-                  filesWithContent.push({ path: file.path, content: textContent, contentHash });
+                  filesWithContent.push({ path: file.path, content, isBinary, contentHash });
                 } catch (e) {
                   errors.push(`read ${file.path}: ${(e as Error).message}`);
                 }
@@ -1021,7 +1043,7 @@ export class ApiBackend extends SyncBackend {
               const commitMessage = this.buildCommitMessage();
 
               const result = await this.batchCommitWithGitDataApi(
-                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                filesWithContent.map(f => ({ path: f.path, content: f.content, isBinary: f.isBinary })),
                 commitMessage
               );
 
@@ -1079,7 +1101,7 @@ export class ApiBackend extends SyncBackend {
               this.log(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.length} files)`);
 
               // Read file contents
-              const filesWithContent: { path: string; content: string; contentHash: string }[] = [];
+              const filesWithContent: { path: string; content: string | ArrayBuffer; isBinary: boolean; contentHash: string }[] = [];
               for (const file of batch) {
                 try {
                   const isBinary = isBinaryFile(file.path);
@@ -1095,11 +1117,7 @@ export class ApiBackend extends SyncBackend {
                     ? await this.gitBlobSha1Binary(content as ArrayBuffer)
                     : await this.gitBlobSha1(content as string);
 
-                  const textContent = isBinary
-                    ? this.encodeBase64Binary(content as ArrayBuffer)
-                    : content as string;
-
-                  filesWithContent.push({ path: file.path, content: textContent, contentHash });
+                  filesWithContent.push({ path: file.path, content, isBinary, contentHash });
                 } catch (e) {
                   errors.push(`read ${file.path}: ${(e as Error).message}`);
                 }
@@ -1110,7 +1128,7 @@ export class ApiBackend extends SyncBackend {
               const commitMessage = this.buildCommitMessage();
 
               const result = await this.uploadFilesWithContentsApi(
-                filesWithContent.map(f => ({ path: f.path, content: f.content })),
+                filesWithContent.map(f => ({ path: f.path, content: f.content, isBinary: f.isBinary })),
                 commitMessage
               );
 
@@ -1336,6 +1354,10 @@ export class ApiBackend extends SyncBackend {
 
   async getFile(path: string): Promise<{ content: string | ArrayBuffer; sha: string } | null> {
     try {
+      if (this.config.provider === 'gitlab') {
+        return await this.getGitlabFile(path);
+      }
+
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${this.config.branch}`
       ) as FileContent & { download_url?: string; size?: number };
@@ -1430,6 +1452,38 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
+   * GitLab: file content + blob SHA from the Repository Files API.
+   * Falls back to the /raw endpoint when the JSON response truncates
+   * inline content (GitLab caps it at ~1MB).
+   */
+  private async getGitlabFile(path: string): Promise<{ content: string | ArrayBuffer; sha: string } | null> {
+    const projectId = this.gitlabProjectId();
+    const encodedPath = encodeURIComponent(path);
+    const isBinary = isBinaryFile(path);
+
+    const data = await this.apiRequest('GET',
+      `/projects/${projectId}/repository/files/${encodedPath}?ref=${encodeURIComponent(this.config.branch)}`
+    ) as { content?: string; encoding?: string; blob_id?: string; size?: number };
+
+    let content: string | ArrayBuffer;
+    // Estimated decoded length of the inline base64 content (complete = size)
+    const decodedLength = data.content ? (data.content.length * 3) / 4 : 0;
+    if (!data.content || (data.size !== undefined && data.size > decodedLength)) {
+      const raw = await this.apiRequest('GET',
+        `/projects/${projectId}/repository/files/${encodedPath}/raw?ref=${encodeURIComponent(this.config.branch)}`,
+        undefined, { raw: true }
+      ) as ArrayBuffer;
+      content = isBinary ? raw : new TextDecoder('utf-8').decode(raw);
+    } else if (isBinary) {
+      content = this.decodeBase64Binary(data.content);
+    } else {
+      content = this.decodeBase64Text(data.content);
+    }
+
+    return { content, sha: data.blob_id || '' };
+  }
+
+  /**
    * Upload files using Git Data API (batch commit)
    * Creates blobs, builds tree, commits, and updates ref in one atomic operation.
    * Falls back to Contents API if Git Data API is not supported (e.g. Gitea).
@@ -1437,7 +1491,7 @@ export class ApiBackend extends SyncBackend {
    * @returns { success, error? } - error indicates fallback should be tried
    */
   private async batchCommitWithGitDataApi(
-    files: { path: string; content: string }[],
+    files: { path: string; content: string | ArrayBuffer; isBinary: boolean }[],
     commitMessage: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
@@ -1471,7 +1525,7 @@ export class ApiBackend extends SyncBackend {
       // Step 2: Create blobs for all files in parallel
       this.log('batchCommitWithGitDataApi: creating blobs...');
       const blobPromises = files.map(async (file) => {
-        const blobSha = await this.createBlob(file.content, false);
+        const blobSha = await this.createBlob(file.content, file.isBinary);
         return { path: file.path, sha: blobSha };
       });
       const blobResults = await this.parallelLimit(blobPromises, 5);
@@ -1518,7 +1572,7 @@ export class ApiBackend extends SyncBackend {
    * Fallback when Git Data API is not supported.
    */
   private async uploadFilesWithContentsApi(
-    files: { path: string; content: string }[],
+    files: { path: string; content: string | ArrayBuffer; isBinary: boolean }[],
     commitMessage: string
   ): Promise<{ success: boolean; error?: string }> {
     try {
@@ -1536,7 +1590,9 @@ export class ApiBackend extends SyncBackend {
 
         const body: Record<string, unknown> = {
           message: commitMessage,
-          content: this.encodeBase64Text(file.content),
+          content: file.isBinary
+            ? this.encodeBase64Binary(file.content as ArrayBuffer)
+            : this.encodeBase64Text(file.content as string),
           branch: this.config.branch,
         };
         if (existingSha) {
@@ -1557,12 +1613,12 @@ export class ApiBackend extends SyncBackend {
    * Supports create, update, and delete in a single commit.
    */
   private async batchCommitWithCommitsApi(
-    files: { path: string; content: string }[],
+    files: { path: string; content: string | ArrayBuffer; isBinary: boolean }[],
     commitMessage: string,
     filesToDelete: string[] = []
   ): Promise<{ success: boolean; error?: string }> {
     try {
-      const projectId = encodeURIComponent(this.config.repo);
+      const projectId = this.gitlabProjectId();
       const actions: Array<Record<string, unknown>> = [];
 
       // Add create/update actions
@@ -1572,7 +1628,7 @@ export class ApiBackend extends SyncBackend {
         let action = 'create';
         try {
           await this.apiRequest('GET',
-            `/projects/${projectId}/repository/files/${encodedFilePath}?ref=${this.config.branch}`
+            `/projects/${projectId}/repository/files/${encodedFilePath}?ref=${encodeURIComponent(this.config.branch)}`
           );
           action = 'update';
         } catch {
@@ -1582,8 +1638,10 @@ export class ApiBackend extends SyncBackend {
         actions.push({
           action,
           file_path: file.path,
-          content: file.content,
-          encoding: 'text',
+          content: file.isBinary
+            ? this.encodeBase64Binary(file.content as ArrayBuffer)
+            : file.content as string,
+          encoding: file.isBinary ? 'base64' : 'text',
         });
       }
 
@@ -1617,9 +1675,6 @@ export class ApiBackend extends SyncBackend {
 
   async putFile(path: string, content: string | ArrayBuffer, sha?: string): Promise<string> {
     const isBinary = content instanceof ArrayBuffer;
-    const base64Content = isBinary
-      ? this.encodeBase64Binary(content)
-      : this.encodeBase64Text(content);
 
     // Build commit message from template
     const now = new Date();
@@ -1627,6 +1682,34 @@ export class ApiBackend extends SyncBackend {
     const commitMessage = (this.config.commitMessage || 'sync: {{path}}')
       .replace('{{date}}', dateStr)
       .replace('{{path}}', path);
+
+    if (this.config.provider === 'gitlab') {
+      // GitLab: Commits API with a single action (no CAS needed)
+      await this.apiRequest('POST',
+        `/projects/${this.gitlabProjectId()}/repository/commits`,
+        {
+          branch: this.config.branch,
+          commit_message: commitMessage,
+          actions: [{
+            action: sha ? 'update' : 'create',
+            file_path: path,
+            content: isBinary
+              ? this.encodeBase64Binary(content as ArrayBuffer)
+              : content as string,
+            encoding: isBinary ? 'base64' : 'text',
+          }],
+        }
+      );
+      // GitLab doesn't return the new blob SHA - compute it locally so it stays
+      // consistent with Tree API blob ids used for change detection
+      return isBinary
+        ? await this.gitBlobSha1Binary(content as ArrayBuffer)
+        : await this.gitBlobSha1(content as string);
+    }
+
+    const base64Content = isBinary
+      ? this.encodeBase64Binary(content)
+      : this.encodeBase64Text(content);
 
     const body: Record<string, string> = {
       message: commitMessage,
@@ -1659,6 +1742,18 @@ export class ApiBackend extends SyncBackend {
   }
 
   async deleteFile(path: string, sha: string): Promise<void> {
+    if (this.config.provider === 'gitlab') {
+      // GitLab: Commits API with a delete action (no CAS needed)
+      await this.apiRequest('POST',
+        `/projects/${this.gitlabProjectId()}/repository/commits`,
+        {
+          branch: this.config.branch,
+          commit_message: `delete: ${path}`,
+          actions: [{ action: 'delete', file_path: path }],
+        }
+      );
+      return;
+    }
     await this.apiRequest('DELETE',
       `/repos/${this.config.repo}/contents/${path}`, {
         message: `delete: ${path}`,
@@ -1670,6 +1765,22 @@ export class ApiBackend extends SyncBackend {
 
   async listFiles(path: string = ''): Promise<FileEntry[]> {
     try {
+      if (this.config.provider === 'gitlab') {
+        // GitLab Tree API (non-recursive): item id is the git object SHA
+        const query = `ref=${encodeURIComponent(this.config.branch)}` +
+          (path ? `&path=${encodeURIComponent(path)}` : '');
+        const data = await this.apiRequest('GET',
+          `/projects/${this.gitlabProjectId()}/repository/tree?${query}`
+        ) as Array<Record<string, unknown>>;
+        if (!Array.isArray(data)) return [];
+        return data.map((item) => ({
+          name: item.name as string,
+          path: item.path as string,
+          sha: item.id as string,
+          size: 0,
+          type: item.type === 'tree' ? 'dir' : 'file',
+        }));
+      }
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${this.config.branch}`
       ) as Array<Record<string, unknown>>;
@@ -1706,6 +1817,10 @@ export class ApiBackend extends SyncBackend {
    * This is much more efficient than fetching each file individually
    */
   async getRemoteTree(): Promise<{ tree: Map<string, string>; headSha: string }> {
+    if (this.config.provider === 'gitlab') {
+      return this.getGitlabRemoteTree();
+    }
+
     const fileMap = new Map<string, string>();
 
     try {
@@ -1747,6 +1862,46 @@ export class ApiBackend extends SyncBackend {
     }
   }
 
+  /**
+   * GitLab: head SHA from the branch API, file tree from the Tree API.
+   * The Tree API is paginated (max 100 items per page) and blob `id`s are
+   * git blob SHAs, so they stay consistent with locally computed hashes.
+   */
+  private async getGitlabRemoteTree(): Promise<{ tree: Map<string, string>; headSha: string }> {
+    const fileMap = new Map<string, string>();
+    const projectId = this.gitlabProjectId();
+
+    // Head commit SHA (404 means empty repo - no branches yet)
+    let headSha = '';
+    try {
+      const branchData = await this.apiRequest('GET',
+        `/projects/${projectId}/repository/branches/${encodeURIComponent(this.config.branch)}`
+      ) as { commit?: { id?: string } };
+      headSha = branchData?.commit?.id || '';
+    } catch (error) {
+      const msg = (error as Error).message || '';
+      if (!msg.includes('404')) throw error;
+      this.log('Remote tree: empty repository (no branches)');
+      return { tree: fileMap, headSha: '' };
+    }
+
+    const MAX_PAGES = 1000;
+    for (let page = 1; page <= MAX_PAGES; page++) {
+      const items = await this.apiRequest('GET',
+        `/projects/${projectId}/repository/tree?ref=${encodeURIComponent(this.config.branch)}&recursive=true&per_page=100&page=${page}`
+      ) as Array<Record<string, unknown>>;
+      if (!Array.isArray(items)) break;
+      for (const item of items) {
+        if (item.type === 'blob') {
+          fileMap.set(item.path as string, item.id as string);
+        }
+      }
+      if (items.length < 100) break;
+    }
+
+    return { tree: fileMap, headSha };
+  }
+
   // ===== History Methods =====
 
   /**
@@ -1754,6 +1909,9 @@ export class ApiBackend extends SyncBackend {
    */
   async getCommitHistory(limit: number = 50): Promise<CommitInfo[]> {
     try {
+      if (this.config.provider === 'gitlab') {
+        return await this.getGitlabCommits(undefined, limit);
+      }
       // Gitea uses 'limit', GitHub uses 'per_page'
       const limitParam = this.config.provider === 'gitea' ? 'limit' : 'per_page';
       const data = await this.apiRequest('GET',
@@ -1777,10 +1935,32 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
+   * GitLab: commit list for a branch (optionally filtered by file path)
+   */
+  private async getGitlabCommits(filePath?: string, limit: number = 50): Promise<CommitInfo[]> {
+    const query = `ref_name=${encodeURIComponent(this.config.branch)}` +
+      (filePath ? `&path=${encodeURIComponent(filePath)}` : '') +
+      `&per_page=${limit}`;
+    const data = await this.apiRequest('GET',
+      `/projects/${this.gitlabProjectId()}/repository/commits?${query}`
+    ) as Array<Record<string, unknown>>;
+    return data.map((commit) => ({
+      sha: commit.id as string,
+      message: (commit.title as string) || '',
+      author: commit.author_name as string,
+      date: commit.authored_date as string,
+      files: [],
+    }));
+  }
+
+  /**
    * Get commit details with changed files
    */
   async getCommitDetails(sha: string): Promise<CommitDetail | null> {
     try {
+      if (this.config.provider === 'gitlab') {
+        return await this.getGitlabCommitDetails(sha);
+      }
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/commits/${sha}`
       ) as Record<string, unknown>;
@@ -1804,6 +1984,34 @@ export class ApiBackend extends SyncBackend {
       console.error('[HybridGitSync] Failed to get commit details:', error);
       return null;
     }
+  }
+
+  /**
+   * GitLab: single commit detail with changed files (diffs array)
+   */
+  private async getGitlabCommitDetails(sha: string): Promise<CommitDetail | null> {
+    const data = await this.apiRequest('GET',
+      `/projects/${this.gitlabProjectId()}/repository/commits/${sha}`
+    ) as Record<string, unknown>;
+    const diffs = (data.diffs as Array<Record<string, unknown>>) || [];
+    return {
+      sha: data.id as string,
+      message: (data.title as string) || '',
+      author: data.author_name as string,
+      date: data.authored_date as string,
+      files: diffs.map((f) => {
+        const renamed = !!f.renamed_file;
+        const added = !!f.new_file;
+        const deleted = !!f.deleted_file;
+        return {
+          path: f.new_path as string,
+          status: renamed ? 'renamed' : added ? 'added' : deleted ? 'deleted' : 'modified',
+          additions: 0,
+          deletions: 0,
+          previousPath: renamed ? f.old_path as string | undefined : undefined,
+        };
+      }),
+    };
   }
 
   /**
@@ -1859,6 +2067,9 @@ export class ApiBackend extends SyncBackend {
    */
   async getFileHistory(path: string, limit: number = 20): Promise<CommitInfo[]> {
     try {
+      if (this.config.provider === 'gitlab') {
+        return await this.getGitlabCommits(path, limit);
+      }
       // Gitea uses 'limit', GitHub uses 'per_page'
       const limitParam = this.config.provider === 'gitea' ? 'limit' : 'per_page';
       const data = await this.apiRequest('GET',
@@ -1886,6 +2097,15 @@ export class ApiBackend extends SyncBackend {
    */
   async getFileAtCommit(path: string, sha: string): Promise<string | null> {
     try {
+      if (this.config.provider === 'gitlab') {
+        const data = await this.apiRequest('GET',
+          `/projects/${this.gitlabProjectId()}/repository/files/${encodeURIComponent(path)}?ref=${encodeURIComponent(sha)}`
+        ) as FileContent;
+        if (data.encoding === 'base64') {
+          return this.decodeBase64Text(data.content);
+        }
+        return data.content;
+      }
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/contents/${path}?ref=${sha}`
       ) as FileContent;
@@ -1906,6 +2126,12 @@ export class ApiBackend extends SyncBackend {
    */
   async getBranches(): Promise<string[]> {
     try {
+      if (this.config.provider === 'gitlab') {
+        const data = await this.apiRequest('GET',
+          `/projects/${this.gitlabProjectId()}/repository/branches`
+        ) as Array<Record<string, string>>;
+        return data.map((branch) => branch.name);
+      }
       const data = await this.apiRequest('GET',
         `/repos/${this.config.repo}/branches`
       ) as Array<Record<string, string>>;
@@ -2002,6 +2228,15 @@ export class ApiBackend extends SyncBackend {
     return this.gitignore.shouldIgnore(path);
   }
 
+  /**
+   * GitLab API project id: the URL-encoded namespace/project path
+   * (e.g. "namespace%2Fproject"). Must stay a single URL segment so the
+   * slash inside the project path is not treated as a path separator.
+   */
+  private gitlabProjectId(): string {
+    return encodeURIComponent(this.config.repo);
+  }
+
   private getDefaultBaseUrl(provider: ApiProvider): string {
     switch (provider) {
       case 'github': return 'https://api.github.com';
@@ -2013,10 +2248,16 @@ export class ApiBackend extends SyncBackend {
   private async apiRequest(
     method: string,
     path: string,
-    body?: Record<string, unknown>
+    body?: Record<string, unknown>,
+    options?: { raw?: boolean }
   ): Promise<unknown> {
     const [pathPart, queryPart] = path.split('?');
-    const encodedPath = pathPart.split('/').map(segment => encodeURIComponent(segment)).join('/');
+    // Segments already containing '%' are pre-encoded (e.g. GitLab project ids
+    // like "ns%2Fproject" and file paths with Chinese characters) - pass them
+    // through as-is to avoid double-encoding.
+    const encodedPath = pathPart.split('/').map(segment =>
+      segment.includes('%') ? segment : encodeURIComponent(segment)
+    ).join('/');
     const url = queryPart
       ? `${this.baseUrl}${encodedPath}?${queryPart}`
       : `${this.baseUrl}${encodedPath}`;
@@ -2050,6 +2291,9 @@ export class ApiBackend extends SyncBackend {
         throw new Error(`API error ${response.status}: ${errorText}`);
       }
 
+      if (options?.raw) {
+        return response.arrayBuffer;
+      }
       return response.json;
     } catch (error) {
       console.error('[HybridGitSync] apiRequest exception:', error);
