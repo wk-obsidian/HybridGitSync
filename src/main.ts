@@ -199,7 +199,7 @@ export default class HybridGitSyncPlugin extends Plugin {
             remoteUrl = `https://github.com/${remoteUrl}.git`;
           }
         }
-        this.backend = new GitBackend(this.app.vault, this.settings.gitPath, remoteUrl, this.settings.apiToken);
+        this.backend = new GitBackend(this.app.vault, this.settings.gitPath, remoteUrl, this.settings.apiToken, this.settings.commitMessage);
 
         // Auto-detect remote info if not configured
         if (!this.settings.remoteUrl) {
@@ -1051,7 +1051,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = this.app.workspace.getLeaf('tab');
     if (!leaf) return;
 
     await leaf.setViewState({ type: HISTORY_VIEW_TYPE });
@@ -1084,7 +1084,7 @@ export default class HybridGitSyncPlugin extends Plugin {
   }
 
   private async showChangesView(): Promise<void> {
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = this.app.workspace.getLeaf('tab');
     if (!leaf) return;
 
     await leaf.setViewState({ type: CHANGES_VIEW_TYPE });
@@ -1120,7 +1120,7 @@ export default class HybridGitSyncPlugin extends Plugin {
       return;
     }
 
-    const leaf = this.app.workspace.getRightLeaf(false);
+    const leaf = this.app.workspace.getLeaf('tab');
     if (!leaf) return;
 
     await leaf.setViewState({ type: DIFF_VIEW_TYPE });

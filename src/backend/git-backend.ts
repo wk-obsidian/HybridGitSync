@@ -9,14 +9,16 @@ export class GitBackend extends SyncBackend {
   private gitPath: string;
   private remoteUrl: string;
   private token: string;
+  private commitMessage: string;
 
-  constructor(vault: Vault, gitPath: string = 'git', remoteUrl: string = '', token: string = '') {
+  constructor(vault: Vault, gitPath: string = 'git', remoteUrl: string = '', token: string = '', commitMessage?: string) {
     super();
     // The vault's absolute path lives on the desktop-only FileSystemAdapter
     this.vaultPath = vault.adapter instanceof FileSystemAdapter ? vault.adapter.getBasePath() : '';
     this.gitPath = gitPath;
     this.remoteUrl = remoteUrl;
     this.token = token;
+    this.commitMessage = commitMessage || '';
   }
 
   /**
@@ -133,6 +135,17 @@ export class GitBackend extends SyncBackend {
     }
   }
 
+  /**
+   * Build commit message from template
+   */
+  private buildCommitMessage(): string {
+    const now = new Date();
+    const dateStr = now.toISOString().replace('T', ' ').substring(0, 19);
+    return (this.commitMessage || 'vault backup: {{date}}')
+      .replace('{{date}}', dateStr)
+      .replace('{{path}}', 'batch');
+  }
+
   async sync(): Promise<SyncResult> {
     try {
       // Step 0: Check git state before syncing
@@ -151,8 +164,10 @@ export class GitBackend extends SyncBackend {
       // Step 2: Check if there are changes to commit
       const status = await this.exec('status --porcelain');
       if (status.trim()) {
-        const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
-        await this.exec(`commit -m "sync: ${timestamp}"`);
+        const message = this.buildCommitMessage();
+        // Escape double quotes in the message for shell safety
+        const safeMessage = message.replace(/"/g, '\\"');
+        await this.exec(`commit -m "${safeMessage}"`);
       }
 
       // Step 3: Try to pull with merge (skip if remote is empty or no upstream)
