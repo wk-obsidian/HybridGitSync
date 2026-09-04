@@ -99,6 +99,13 @@ export class ApiBackend extends SyncBackend {
         this.baseUrl = `${normalized}/api/v4`;
       }
     }
+    // Gitea serves its API under /api/v1 - normalize self-hosted base URLs
+    if (config.provider === 'gitea') {
+      const normalized = this.baseUrl.replace(/\/+$/, '');
+      if (!normalized.endsWith('/api/v1')) {
+        this.baseUrl = `${normalized}/api/v1`;
+      }
+    }
     this.stateManager = new SyncStateManager(vault);
     this.gitignore = gitignore || new GitignoreRules(vault.configDir);
     this.debug = debug;
@@ -1519,7 +1526,7 @@ export class ApiBackend extends SyncBackend {
           this.log('Download response status:', response.status);
           if (response.status >= 400) {
             this.log('Download response text:', response.text?.substring(0, 500));
-            throw new Error(`Download failed with status ${response.status}`);
+            throw new Error(`Download failed with status ${response.status}: ${path}`);
           }
           const responseSize = response.arrayBuffer?.byteLength || response.text?.length || 0;
           this.log('Download response size:', responseSize, 'bytes');
@@ -1944,8 +1951,14 @@ export class ApiBackend extends SyncBackend {
           `/repos/${this.config.repo}/branches/${this.config.branch}`,
           { silentNotFound: true }
         );
-        headSha = branchData?.commit?.sha || '';
+        // Gitea uses commit.id, GitHub uses commit.sha
+        headSha = branchData?.commit?.sha || (branchData?.commit as Record<string, unknown>)?.id as string || '';
         if (!headSha) {
+          this.logger.warn('Branch API returned no commit SHA — treating as empty repo', {
+            repo: this.config.repo,
+            branch: this.config.branch,
+            response: JSON.stringify(branchData).substring(0, 300),
+          });
           return { tree: fileMap, headSha: '' };
         }
       } else {
@@ -1980,7 +1993,11 @@ export class ApiBackend extends SyncBackend {
       // GitHub returns 409 "Git Repository is empty" for empty repos
       const msg = (error as Error).message || '';
       if (msg.includes('404') || msg.includes('409')) {
-        this.log('Remote tree: empty repository (no branch refs)');
+        this.logger.warn('Remote tree request failed — treating as empty repo', {
+          repo: this.config.repo,
+          branch: this.config.branch,
+          error: msg,
+        });
         return { tree: fileMap, headSha: '' };
       }
       throw error;
@@ -2491,9 +2508,10 @@ export class ApiBackend extends SyncBackend {
         // 404/409 that callers expect (e.g. branch ref checks, empty repos) are not errors
         const isExpected = !!options?.silentNotFound && (response.status === 404 || response.status === 409);
         if (!isExpected) {
-          console.error('[HybridGitSync] apiRequest error:', response.status, errorText);
+          console.error('[HybridGitSync] apiRequest error:', response.status, url, errorText);
         }
-        throw new Error(`API error ${response.status}: ${errorText}`);
+        // Include method + URL in the error for clarity; avoid dumping raw HTML bodies
+        throw new Error(`API error ${response.status}: ${method} ${url}`);
       }
 
       if (options?.raw) {
