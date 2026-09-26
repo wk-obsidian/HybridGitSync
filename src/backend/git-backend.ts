@@ -19,7 +19,16 @@ export class GitBackend extends SyncBackend {
   constructor(vault: Vault, gitPath: string = 'git', remoteUrl: string = '', token: string = '', commitMessage?: string, debug = false) {
     super();
     // The vault's absolute path lives on the desktop-only FileSystemAdapter
-    this.vaultPath = vault.adapter instanceof FileSystemAdapter ? vault.adapter.getBasePath() : '';
+    const adapter = vault.adapter as any;
+    if (typeof adapter?.getBasePath === 'function') {
+      this.vaultPath = adapter.getBasePath();
+    } else if (typeof adapter?.basePath === 'string') {
+      this.vaultPath = adapter.basePath;
+    } else if (vault.adapter instanceof FileSystemAdapter) {
+      this.vaultPath = vault.adapter.getBasePath();
+    } else {
+      this.vaultPath = '';
+    }
     this.configuredGitPath = gitPath;
     this.remoteUrl = remoteUrl;
     this.token = token;
@@ -36,6 +45,10 @@ export class GitBackend extends SyncBackend {
 
   get gitPath(): string {
     return this.resolvedGitPath ?? this.configuredGitPath;
+  }
+
+  getVaultPath(): string {
+    return this.vaultPath;
   }
 
   private log(...args: unknown[]): void {
@@ -508,15 +521,25 @@ export class GitBackend extends SyncBackend {
       // Git hooks (git-lfs pre-push, etc.) resolve helpers via PATH. Obsidian
       // is launched with a minimal PATH that often misses Homebrew locations,
       // so prepend the git binary's own directory plus common install dirs.
-      const pathSep = this.getPlatform() === 'win32' ? ';' : ':';
-      const extraDirs = ['/usr/local/bin', '/opt/homebrew/bin'];
+      const isWin = this.getPlatform() === 'win32';
+      const pathSep = isWin ? ';' : ':';
+      const extraDirs = isWin ? [] : ['/usr/local/bin', '/opt/homebrew/bin'];
       const slash = gitExe.lastIndexOf('/');
       const backslash = gitExe.lastIndexOf('\\');
       const lastSep = Math.max(slash, backslash);
       if (lastSep > 0) {
         extraDirs.unshift(gitExe.slice(0, lastSep));
       }
-      env.PATH = extraDirs.join(pathSep) + (env.PATH ? pathSep + env.PATH : '');
+      // On Windows process.env key is usually 'Path' rather than 'PATH'.
+      // Spreading creates a plain object where case matters.
+      const pathKey = Object.keys(env).find((k) => k.toUpperCase() === 'PATH') || (isWin ? 'Path' : 'PATH');
+      const existingPath = env[pathKey] || '';
+      if (extraDirs.length > 0) {
+        env[pathKey] = extraDirs.join(pathSep) + (existingPath ? pathSep + existingPath : '');
+      }
+      if (pathKey !== 'PATH' && 'PATH' in env) {
+        delete (env as Record<string, string | undefined>).PATH;
+      }
       if (this.token) {
         // Use GIT_ASKPASS to provide credentials non-interactively
         // This tells git to use our token when it asks for credentials
