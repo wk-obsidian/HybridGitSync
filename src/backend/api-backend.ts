@@ -49,6 +49,8 @@ interface GitTreeItem {
 
 interface GitTreeResponse {
   tree: GitTreeItem[];
+  truncated?: boolean;
+  total_count?: number;
 }
 
 /** GitHub/Gitea/Gitee git ref response */
@@ -2487,6 +2489,7 @@ export class ApiBackend extends SyncBackend {
         // Gitea/Gitee: git/refs endpoint may not work — use branches endpoint instead
         const branchData = await this.apiRequest<{ commit?: { sha?: string } }>('GET',
           `/repos/${this.config.repo}/branches/${this.config.branch}`,
+          undefined,
           { silentNotFound: true }
         );
         // Gitea uses commit.id, GitHub/Gitee use commit.sha
@@ -2511,16 +2514,42 @@ export class ApiBackend extends SyncBackend {
         headSha = branchInfo.object.sha;
       }
 
-      // Gitea uses ?recursive=true, GitHub uses ?recursive=1
-      const recursiveParam = this.config.provider === 'gitea' ? 'recursive=true' : 'recursive=1';
-      const tree = await this.apiRequest<GitTreeResponse>('GET',
-        `/repos/${this.config.repo}/git/trees/${headSha}?${recursiveParam}`
-      );
+      // Gitea paginates the tree API (default/max 1000 entries per page,
+      // DEFAULT_GIT_TREES_PER_PAGE) and sets `truncated` when more pages remain.
+      // Loop over every page so large vaults aren't silently cut off (which the
+      // sync engine would otherwise misread as remote deletions).
+      if (this.config.provider === 'gitea') {
+        const perPage = 1000;
+        let page = 1;
+        let truncated = true;
+        while (truncated) {
+          const tree = await this.apiRequest<GitTreeResponse>('GET',
+            `/repos/${this.config.repo}/git/trees/${headSha}?recursive=true&page=${page}&per_page=${perPage}`
+          );
+          if (tree.tree) {
+            for (const item of tree.tree) {
+              if (item.type === 'blob') {
+                fileMap.set(item.path, item.sha);
+              }
+            }
+          }
+          truncated = !!tree.truncated;
+          page++;
+          // Safety valve against a misbehaving server that always reports truncated
+          if (page > 1000) break;
+        }
+      } else {
+        // Gitea uses ?recursive=true, GitHub uses ?recursive=1
+        const recursiveParam = this.config.provider === 'gitee' ? 'recursive=true' : 'recursive=1';
+        const tree = await this.apiRequest<GitTreeResponse>('GET',
+          `/repos/${this.config.repo}/git/trees/${headSha}?${recursiveParam}`
+        );
 
-      if (tree.tree) {
-        for (const item of tree.tree) {
-          if (item.type === 'blob') {
-            fileMap.set(item.path, item.sha);
+        if (tree.tree) {
+          for (const item of tree.tree) {
+            if (item.type === 'blob') {
+              fileMap.set(item.path, item.sha);
+            }
           }
         }
       }
@@ -2642,7 +2671,7 @@ export class ApiBackend extends SyncBackend {
         return await this.getGitlabCommitDetails(sha);
       }
       const data = await this.apiRequest<Record<string, unknown>>('GET',
-        `/repos/${this.config.repo}/commits/${sha}`
+        this.singleCommitPath(sha)
       );
       const commitData = data.commit as Record<string, unknown>;
       const author = commitData.author as Record<string, string>;
@@ -2767,6 +2796,17 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
+   * Path to a single commit for the current provider.
+   * GitHub serves single commits under `/repos/{owner}/{repo}/commits/{sha}`,
+   * but Gitea only exposes `/repos/{owner}/{repo}/git/commits/{sha}`.
+   */
+  private singleCommitPath(sha: string): string {
+    return this.config.provider === 'gitea'
+      ? `/repos/${this.config.repo}/git/commits/${sha}`
+      : `/repos/${this.config.repo}/commits/${sha}`;
+  }
+
+  /**
    * Get the parent commit SHAs of a commit (empty for a root commit).
    * GitHub/Gitea expose `parents` on the commit endpoint; GitLab uses
    * `parent_ids` on the same-shaped response.
@@ -2780,7 +2820,7 @@ export class ApiBackend extends SyncBackend {
       return Array.isArray(ids) ? ids as string[] : [];
     }
     const data = await this.apiRequest<Record<string, unknown>>('GET',
-      `/repos/${this.config.repo}/commits/${sha}`
+      this.singleCommitPath(sha)
     );
     const parents = data?.parents;
     if (!Array.isArray(parents)) return [];
