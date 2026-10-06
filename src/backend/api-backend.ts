@@ -400,6 +400,18 @@ export class ApiBackend extends SyncBackend {
   }
 
   /**
+   * HTTP method for the GitHub-style Contents API write route.
+   *
+   * GitHub exposes a single PUT "create or update file contents" route and
+   * answers 404 to anything else. Gitea/Forgejo/Gitee split that route:
+   * POST creates, PUT updates (and takes the blob sha).
+   */
+  private contentsWriteMethod(isCreate: boolean): 'POST' | 'PUT' {
+    if (this.config.provider === 'github') return 'PUT';
+    return isCreate ? 'POST' : 'PUT';
+  }
+
+  /**
    * GitHub/Gitea: Use Contents API to create first file (auto-creates branch)
    */
   private async initializeGithubGiteaRepo(base64Content: string): Promise<void> {
@@ -407,8 +419,7 @@ export class ApiBackend extends SyncBackend {
     this.log('Creating .gitignore via Contents API...');
     try {
       // Use configured branch, or let the platform create the default branch
-      // All platforms: POST for creation, PUT for update
-      const method = 'POST';
+      const method = this.contentsWriteMethod(true);
       const body: Record<string, unknown> = {
         message: 'Initial commit',
         content: base64Content,
@@ -2165,8 +2176,7 @@ export class ApiBackend extends SyncBackend {
           body.sha = existingSha;
         }
 
-        // All platforms: POST for creation, PUT for update
-        const method = !existingSha ? 'POST' : 'PUT';
+        const method = this.contentsWriteMethod(!existingSha);
         await this.apiRequest(method, `/repos/${this.config.repo}/contents/${file.path}`, body);
       }
       return { success: true };
@@ -2301,8 +2311,7 @@ export class ApiBackend extends SyncBackend {
     const maxRetries = 3;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        // All platforms: POST for creation, PUT for update
-        const method = !sha ? 'POST' : 'PUT';
+        const method = this.contentsWriteMethod(!sha);
         const data = await this.apiRequest<PutFileResponse>(method,
           `/repos/${this.config.repo}/contents/${path}`, body
         );
@@ -2417,7 +2426,7 @@ export class ApiBackend extends SyncBackend {
     const maxRetries = 3;
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const method = !sha ? 'POST' : 'PUT';
+        const method = this.contentsWriteMethod(!sha);
         const data = await this.apiRequest<PutFileResponse>(method,
           `/repos/${this.config.repo}/contents/${path}`, body
         );
